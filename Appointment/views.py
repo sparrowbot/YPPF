@@ -367,6 +367,7 @@ def arrange_time(request: HttpRequest):
         raise PermissionError('您没有权限预约该房间！')
     # 判断当前用户是否可以进行长期预约
     has_longterm_permission = get_participant(user).longterm
+    # FIXME: Add warning if has_longterm_permission is False
     is_longterm = has_longterm_permission and request.GET.get(
         'is_longterm') == 'true'
     # 获取start_week参数
@@ -417,6 +418,10 @@ def arrange_time(request: HttpRequest):
     start_day = date(start_day['year'], start_day['month'], start_day['day'])
     # 给出已有预约的信息
     # TODO: 后续可优化
+    # FIXME: When computing conflicting appointments, the longterm appointments
+    # are not working as expected.
+    # Change this later by perhaps removing the "weekly renew" logic of longterm
+    # appointments.
     for appoint in appoints:
         change_id_list = web_func.timerange2idlist(room.Rid, appoint.Astart,
                                                    appoint.Afinish,
