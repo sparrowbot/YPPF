@@ -92,10 +92,10 @@
                                                 <div id="to-normal-btns" class="mt-3 {{ is_longterm|yesno:'d-flex,d-none,d-none' }}">
                                                     <button id="to-normal" class="btn btn-sm btn-primary flex-fill mr-1">切换为普通预约</button>
                                                     {% if start_week == 0 or start_week == None %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&start_week=1">查看下周
+                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&start_week=1">查看下周
                                                     </a>
                                                     {% elif start_week == 1 %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&start_week=0">查看本周
+                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&start_week=0">查看本周
                                                     </a>
                                                     {% endif %}
                                                 </div>
@@ -248,10 +248,8 @@
 			let start_week={{ start_week |default_if_none:0}}
 			let room_id='{{ room_object.Rid }}'
 			$("#to-normal").on("click",function(){
-				if(start_week===1){
-					window.location="/underground/arrange_time?Rid="+room_id;
-				}
-				is_longterm=false
+                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=false&start_week="+start_week;
+				is_longterm=false;
 				$("#to-normal-btns").toggleClass("d-flex");
 				$("#to-normal-btns").toggleClass("d-none");
 				$("#to-longterm-btns").toggleClass("d-flex");
@@ -259,7 +257,8 @@
 				$(".timing-appointed").css("background","lightcoral")
 			})
 			$("#to-longterm").on("click",function(){
-				is_longterm=true
+                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=true&start_week="+start_week;
+				is_longterm=true;
 				$("#to-normal-btns").toggleClass("d-flex");
 				$("#to-normal-btns").toggleClass("d-none");
 				$("#to-longterm-btns").toggleClass("d-flex");
@@ -344,16 +343,6 @@
 					alert("请选择预约时段!");
 				}
 				else { //到这里 说明预约符合要求
-					/*
-					$.post('arrange_time',
-						{
-							"Rid": "{{room_object.Rid}}",
-							"weekday":weekday,
-							"startid": startid,
-							"endid": endid,
-							csrfmiddlewaretoken: '{{ csrf_token  }}',
-						});
-					*/
 					if(endid - startid > 5){
                         return alert("常规预约时间不能超过3小时!");
 					}

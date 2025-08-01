@@ -368,10 +368,20 @@ def arrange_time(request: HttpRequest):
     # 判断当前用户是否可以进行长期预约
     has_longterm_permission = get_participant(user).longterm
     is_longterm = has_longterm_permission and request.GET.get(
-        'start_week') != None
-    next_week = (request.GET.get('start_week') == '1') and is_longterm
+        'is_longterm') == 'true'
+    # 获取start_week参数
+    try:
+        start_week = int(request.GET.get('start_week', '0'))
+        # FIXME: Add warning for these cases
+        if start_week < 0:
+            start_week = 0
+        if start_week >= 4:
+            start_week = 3
+    except ValueError:
+        raise ValueError('start_week参数格式错误！')
     dayrange_list, start_day, end_next_day = web_func.get_dayrange(
-        day_offset=7 if next_week else 0)
+        day_offset=7 * start_week
+    )
     # 获取预约时间的最大时间块id
     max_stamp_id = web_func.get_time_id(room, room.Rfinish, mode="leftopen")
 
@@ -453,7 +463,7 @@ def arrange_time(request: HttpRequest):
             day['timesection'][i]['display_info'] = display_info
 
     # 删去今天已经过去的时间
-    if not next_week:
+    if start_week == 0:
         curr_stamp_id = web_func.get_time_id(room, datetime.now().time())
         for i in range(min(max_stamp_id, curr_stamp_id) + 1):
             dayrange_list[0]['timesection'][i]['status'] = TimeStatus.PASSED
@@ -462,7 +472,7 @@ def arrange_time(request: HttpRequest):
         room_object=room,
         is_longterm=is_longterm,
         has_longterm_permission=has_longterm_permission,
-        start_week=1 if next_week else 0,
+        start_week=start_week,
         dayrange_list=dayrange_list,
         # 转换成方便前端使用的形式
         js_dayrange_list=json.dumps(dayrange_list),
