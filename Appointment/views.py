@@ -478,6 +478,8 @@ def arrange_time(request: HttpRequest):
         is_longterm=is_longterm,
         has_longterm_permission=has_longterm_permission,
         start_week=start_week,
+        prev_start_week=None if start_week == 0 else start_week - 1,
+        next_start_week=None if start_week == 3 else start_week + 1,
         dayrange_list=dayrange_list,
         # 转换成方便前端使用的形式
         js_dayrange_list=json.dumps(dayrange_list),

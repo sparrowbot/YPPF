@@ -117,9 +117,13 @@
                                             <div class="day-slot">
                                                 <ul>
                                                     <li class="left-arrow">
-                                                        <a href="#">
+                                                        {% if prev_start_week is not None %}
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&start_week={{ prev_start_week }}">
                                                             <i class="fa fa-chevron-left"></i>
                                                         </a>
+                                                        {% else %}
+                                                        <i class="fa fa-chevron-left"></i>
+                                                        {% endif %}
                                                     </li>
                                                     {% for day in dayrange_list %}
                                                         <li>
@@ -128,9 +132,13 @@
                                                         </li>
                                                     {% endfor %}
                                                     <li class="right-arrow">
-                                                        <a href="#">
+                                                        {% if next_start_week is not None %}
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&start_week={{ next_start_week }}">
                                                             <i class="fa fa-chevron-right"></i>
                                                         </a>
+                                                        {% else %}
+                                                        <i class="fa fa-chevron-right"></i>
+                                                        {% endif %}
                                                     </li>
                                                 </ul>
                                             </div>
