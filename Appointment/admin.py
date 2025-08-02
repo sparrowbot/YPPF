@@ -46,10 +46,11 @@ class ParticipantAdmin(admin.ModelAdmin):
     actions_on_top = True
     actions_on_bottom = True
     search_fields = ('Sid__username', 'Sid__name', 'Sid__pinyin', 'Sid__acronym')
-    list_display = ('Sid_id', 'name', 'credit', 'longterm', 'hidden')
+    list_display = ('Sid_id', 'name', 'credit', 'longterm',
+                    'hidden', 'preview_weeks')
     list_display_links = ('Sid_id', 'name')
 
-    list_filter = ('Sid__credit', 'longterm', 'hidden')
+    list_filter = ('Sid__credit', 'longterm', 'hidden', 'preview_weeks')
 
     @readonly_inline
     class AppointInline(admin.TabularInline):

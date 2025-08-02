@@ -380,12 +380,15 @@ def arrange_time(request: HttpRequest):
     # 获取目标周参数，用于显示不同周的时间表
     try:
         target_week = int(request.GET.get('target_week', '0'))
+        # 获取当前用户的最大目标周数
+        participant = get_participant(user)
+        preview_weeks = participant.preview_weeks
         if target_week < 0:
             wrong("目标周数不能为负数，已自动调整为第0周！", render_context)
             target_week = 0
-        if target_week >= 4:
-            wrong("目标周数超出范围，已自动调整为第3周！", render_context)
-            target_week = 3
+        if target_week >= preview_weeks:
+            wrong(f"目标周数超出范围，已自动调整为第{preview_weeks - 1}周！", render_context)
+            target_week = preview_weeks - 1
     except ValueError:
         raise ValueError('target_week参数格式错误！')
 
@@ -485,7 +488,7 @@ def arrange_time(request: HttpRequest):
         has_longterm_permission=has_longterm_permission,
         target_week=target_week,
         prev_target_week=None if target_week == 0 else target_week - 1,
-        next_target_week=None if target_week == 3 else target_week + 1,
+        next_target_week=None if target_week == preview_weeks - 1 else target_week + 1,
         dayrange_list=dayrange_list,
         # 转换成方便前端使用的形式
         js_dayrange_list=json.dumps(dayrange_list),
@@ -733,9 +736,10 @@ def checkout_appoint(request: UserRequest):
             current_date = datetime.now().date()
             # 确保预约日期不早于今天
             assert target_date >= current_date, '预约日期不能早于今天'
-            # 确保预约日期不超过4周后 FIXME: 不同用户有不同限制
-            max_date = current_date + timedelta(weeks=4)
-            assert target_date <= max_date, '预约日期不能超过4周后'
+            # 确保预约日期不超过用户的最大目标周数
+            max_date = current_date + \
+                timedelta(weeks=applicant.preview_weeks)
+            assert target_date <= max_date, f'预约日期不能超过{applicant.preview_weeks}周后'
         except ValueError as e:
             raise AssertionError('日期格式不合法！')
         assert has_longterm_permission or not is_longterm, '没有长期预约权限'
