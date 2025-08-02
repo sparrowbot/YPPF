@@ -118,7 +118,7 @@
                                                 <ul>
                                                     <li class="left-arrow">
                                                         {% if prev_target_week is not None %}
-                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&target_week={{ prev_target_week }}">
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm|yesno:'true,false' }}&target_week={{ prev_target_week }}">
                                                             <i class="fa fa-chevron-left"></i>
                                                         </a>
                                                         {% else %}
@@ -133,7 +133,7 @@
                                                     {% endfor %}
                                                     <li class="right-arrow">
                                                         {% if next_target_week is not None %}
-                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&target_week={{ next_target_week }}">
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm|yesno:'true,false' }}&target_week={{ next_target_week }}">
                                                             <i class="fa fa-chevron-right"></i>
                                                         </a>
                                                         {% else %}
