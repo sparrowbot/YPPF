@@ -365,21 +365,30 @@ def arrange_time(request: HttpRequest):
     room = Room.objects.permitted().get(Rid=request.GET.get('Rid'))
     if not room.check_user_perm(user):
         raise PermissionError('您没有权限预约该房间！')
+
+    render_context = dict()
+
     # 判断当前用户是否可以进行长期预约
     has_longterm_permission = get_participant(user).longterm
-    # FIXME: Add warning if has_longterm_permission is False
     is_longterm = has_longterm_permission and request.GET.get(
         'is_longterm') == 'true'
+
+    # 检查长期预约权限并添加警告
+    if not has_longterm_permission and request.GET.get('is_longterm') == 'true':
+        wrong("您没有长期预约权限，无法进行长期预约！", render_context)
+
     # 获取目标周参数，用于显示不同周的时间表
     try:
         target_week = int(request.GET.get('target_week', '0'))
-        # FIXME: Add warning for these cases
         if target_week < 0:
+            wrong("目标周数不能为负数，已自动调整为第0周！", render_context)
             target_week = 0
         if target_week >= 4:
+            wrong("目标周数超出范围，已自动调整为第3周！", render_context)
             target_week = 3
     except ValueError:
         raise ValueError('target_week参数格式错误！')
+
     dayrange_list, start_day, end_next_day = web_func.get_dayrange(
         day_offset=7 * target_week
     )
@@ -418,10 +427,6 @@ def arrange_time(request: HttpRequest):
     start_day = date(start_day['year'], start_day['month'], start_day['day'])
     # 给出已有预约的信息
     # TODO: 后续可优化
-    # FIXME: When computing conflicting appointments, the longterm appointments
-    # are not working as expected.
-    # Change this later by perhaps removing the "weekly renew" logic of longterm
-    # appointments.
     for appoint in appoints:
         change_id_list = web_func.timerange2idlist(room.Rid, appoint.Astart,
                                                    appoint.Afinish,
@@ -473,7 +478,8 @@ def arrange_time(request: HttpRequest):
         for i in range(min(max_stamp_id, curr_stamp_id) + 1):
             dayrange_list[0]['timesection'][i]['status'] = TimeStatus.PASSED
 
-    render_context = dict(
+    # 使用update方法更新渲染上下文
+    render_context.update(
         room_object=room,
         is_longterm=is_longterm,
         has_longterm_permission=has_longterm_permission,

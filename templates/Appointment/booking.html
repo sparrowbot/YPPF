@@ -42,6 +42,21 @@
                     <div class="row">
                         {% comment %} replace js alert with bootstrap alert {% endcomment %}
                         <div class="col-12">
+                            {% if warn_code == 1 %}
+                                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                                    {{ warn_message }}
+                                    <button type="button" class="close" data-dismiss="alert">
+                                        <span>&times;</span>
+                                    </button>
+                                </div>
+                            {% elif warn_code == 2 %}
+                                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                                    {{ warn_message }}
+                                    <button type="button" class="close" data-dismiss="alert">
+                                        <span>&times;</span>
+                                    </button>
+                                </div>
+                            {% endif %}
                             <div class="alert alert-info alert-dismissible fade show" role="alert">
                                 <strong>温馨提示：</strong> 点击【房间名称】可以选择【其他房间】进行预约。
                                 <button type="button" class="close" data-dismiss="alert">
