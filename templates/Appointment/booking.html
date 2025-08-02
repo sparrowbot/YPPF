@@ -91,11 +91,11 @@
                                             {% if has_longterm_permission %}
                                                 <div id="to-normal-btns" class="mt-3 {{ is_longterm|yesno:'d-flex,d-none,d-none' }}">
                                                     <button id="to-normal" class="btn btn-sm btn-primary flex-fill mr-1">切换为普通预约</button>
-                                                    {% if start_week == 0 or start_week == None %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&start_week=1">查看下周
+                                                    {% if target_week == 0 or target_week == None %}
+                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&target_week=1">查看下周
                                                     </a>
-                                                    {% elif start_week == 1 %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&start_week=0">查看本周
+                                                    {% elif target_week == 1 %}
+                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&target_week=0">查看本周
                                                     </a>
                                                     {% endif %}
                                                 </div>
@@ -117,8 +117,8 @@
                                             <div class="day-slot">
                                                 <ul>
                                                     <li class="left-arrow">
-                                                        {% if prev_start_week is not None %}
-                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&start_week={{ prev_start_week }}">
+                                                        {% if prev_target_week is not None %}
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&target_week={{ prev_target_week }}">
                                                             <i class="fa fa-chevron-left"></i>
                                                         </a>
                                                         {% else %}
@@ -132,8 +132,8 @@
                                                         </li>
                                                     {% endfor %}
                                                     <li class="right-arrow">
-                                                        {% if next_start_week is not None %}
-                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&start_week={{ next_start_week }}">
+                                                        {% if next_target_week is not None %}
+                                                        <a href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm={{ is_longterm }}&target_week={{ next_target_week }}">
                                                             <i class="fa fa-chevron-right"></i>
                                                         </a>
                                                         {% else %}
@@ -253,10 +253,10 @@
 			// 长期预约参数
             {% if has_longterm_permission %}
 			let is_longterm={{ is_longterm |yesno:'true,false'}}
-			let start_week={{ start_week |default_if_none:0}}
+			let target_week={{ target_week |default_if_none:0}}
 			let room_id='{{ room_object.Rid }}'
 			$("#to-normal").on("click",function(){
-                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=false&start_week="+start_week;
+                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=false&target_week="+target_week;
 				is_longterm=false;
 				$("#to-normal-btns").toggleClass("d-flex");
 				$("#to-normal-btns").toggleClass("d-none");
@@ -265,7 +265,7 @@
 				$(".timing-appointed").css("background","lightcoral")
 			})
 			$("#to-longterm").on("click",function(){
-                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=true&start_week="+start_week;
+                window.location="/underground/arrange_time?Rid="+room_id+"&is_longterm=true&target_week="+target_week;
 				is_longterm=true;
 				$("#to-normal-btns").toggleClass("d-flex");
 				$("#to-normal-btns").toggleClass("d-none");
@@ -357,14 +357,28 @@
                     if(endid - startid === 1){
                         if(!confirm("时长30分钟的预约只需点击开始时间块即可。您确定要发起时长1小时的预约吗?")) return;
                     }
+                    // 找到选中的日期
+                    let daylist = {{ js_dayrange_list| safe}};
+                    let selectedDay = null;
+                    for (let i = 0; i < daylist.length; i++) {
+                        if (daylist[i]['weekday'] == weekday) {
+                            selectedDay = daylist[i];
+                            break;
+                        }
+                    }
+                    if (!selectedDay) {
+                        alert("无法找到选中的日期!");
+                        return;
+                    }
                     let urls = "check_out?Rid=" + "{{room_object.Rid}}";
-                    urls = urls + "&weekday=" + weekday;
                     urls = urls + "&startid=" + startid;
                     urls = urls + "&endid=" + endid;
+                    urls = urls + "&year=" + selectedDay.year;
+                    urls = urls + "&month=" + selectedDay.month;
+                    urls = urls + "&day=" + selectedDay.day;
                     {% if has_longterm_permission %}
-                    if(is_longterm){
+                    if (is_longterm) {
                         urls = urls + "&longterm=on";
-                        urls = urls + "&start_week=" + start_week;
                     }
                     {% endif %}
                     window.location = urls;

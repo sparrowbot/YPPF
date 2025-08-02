@@ -370,18 +370,18 @@ def arrange_time(request: HttpRequest):
     # FIXME: Add warning if has_longterm_permission is False
     is_longterm = has_longterm_permission and request.GET.get(
         'is_longterm') == 'true'
-    # 获取start_week参数
+    # 获取目标周参数，用于显示不同周的时间表
     try:
-        start_week = int(request.GET.get('start_week', '0'))
+        target_week = int(request.GET.get('target_week', '0'))
         # FIXME: Add warning for these cases
-        if start_week < 0:
-            start_week = 0
-        if start_week >= 4:
-            start_week = 3
+        if target_week < 0:
+            target_week = 0
+        if target_week >= 4:
+            target_week = 3
     except ValueError:
-        raise ValueError('start_week参数格式错误！')
+        raise ValueError('target_week参数格式错误！')
     dayrange_list, start_day, end_next_day = web_func.get_dayrange(
-        day_offset=7 * start_week
+        day_offset=7 * target_week
     )
     # 获取预约时间的最大时间块id
     max_stamp_id = web_func.get_time_id(room, room.Rfinish, mode="leftopen")
@@ -468,7 +468,7 @@ def arrange_time(request: HttpRequest):
             day['timesection'][i]['display_info'] = display_info
 
     # 删去今天已经过去的时间
-    if start_week == 0:
+    if target_week == 0:
         curr_stamp_id = web_func.get_time_id(room, datetime.now().time())
         for i in range(min(max_stamp_id, curr_stamp_id) + 1):
             dayrange_list[0]['timesection'][i]['status'] = TimeStatus.PASSED
@@ -477,9 +477,9 @@ def arrange_time(request: HttpRequest):
         room_object=room,
         is_longterm=is_longterm,
         has_longterm_permission=has_longterm_permission,
-        start_week=start_week,
-        prev_start_week=None if start_week == 0 else start_week - 1,
-        next_start_week=None if start_week == 3 else start_week + 1,
+        target_week=target_week,
+        prev_target_week=None if target_week == 0 else target_week - 1,
+        next_target_week=None if target_week == 3 else target_week + 1,
         dayrange_list=dayrange_list,
         # 转换成方便前端使用的形式
         js_dayrange_list=json.dumps(dayrange_list),
@@ -571,7 +571,7 @@ def arrange_talk_room(request):
 
     js_rooms_time_list = json.dumps(rooms_time_list)
     js_weekday = json.dumps(
-        {'weekday': wklist[datetime(year, month, day).weekday()]})
+        {'weekday': datetime(year, month, day).strftime("%a")})
 
     return render(request, 'Appointment/booking-talk.html', locals())
 
@@ -676,22 +676,24 @@ def checkout_appoint(request: UserRequest):
     """
     if request.method == "GET":
         Rid = request.GET.get('Rid')
-        weekday = request.GET.get('weekday')
         startid = request.GET.get('startid')
         endid = request.GET.get('endid')
-        start_week = request.GET.get('start_week', 0)
+        year = request.GET.get('year')
+        month = request.GET.get('month')
+        day = request.GET.get('day')
         is_longterm = True if request.GET.get('longterm') == 'on' else False
         is_interview = False
     else:
+        print('checkout_appoint POST:', request.POST)
         Rid = request.POST.get('Rid')
-        weekday = request.POST.get('weekday')
         startid = request.POST.get('startid')
         endid = request.POST.get('endid')
+        year = request.POST.get('year')
+        month = request.POST.get('month')
+        day = request.POST.get('day')
         is_longterm = True if request.POST.get('longterm') == 'on' else False
-        start_week = 0
         is_interview = False
         if is_longterm:
-            start_week = request.POST.get('start_week', 0)
             # 长期预约的次数
             times = request.POST.get('times', 0)
             # 间隔为1代表每周，为2代表隔周
@@ -706,19 +708,30 @@ def checkout_appoint(request: UserRequest):
 
     try:
         # 参数类型转换与合法性检查
-        start_week = int(start_week)
         startid = int(startid)
         endid = int(endid)
+        year = int(year)
+        month = int(month)
+        day = int(day)
         if is_longterm and request.method == 'POST':
             assert times, '长期预约周数未填写'
             times = int(times)
             interval = int(interval)
             assert 1 <= interval <= CONFIG.longterm_max_interval, '间隔周数'
-        assert weekday in wklist, '星期几'
         assert startid >= 0, '起始时间'
         assert endid >= 0, '结束时间'
         assert endid >= startid, '起始时间晚于结束时间'
-        assert start_week == 0 or start_week == 1, '预约周数'
+        # 验证日期合法性
+        try:
+            target_date = date(year, month, day)
+            current_date = datetime.now().date()
+            # 确保预约日期不早于今天
+            assert target_date >= current_date, '预约日期不能早于今天'
+            # 确保预约日期不超过4周后 FIXME: 不同用户有不同限制
+            max_date = current_date + timedelta(weeks=4)
+            assert target_date <= max_date, '预约日期不能超过4周后'
+        except ValueError as e:
+            raise AssertionError('日期格式不合法！')
         assert has_longterm_permission or not is_longterm, '没有长期预约权限'
         if is_interview:
             assert has_interview_permission, '没有面试权限'
@@ -727,36 +740,33 @@ def checkout_appoint(request: UserRequest):
     except:
         return redirect(message_url(wrong('参数不合法'), reverse('Appointment:index')))
 
+    # 通过日期计算星期几
+    weekday = target_date.strftime("%a")
+
     appoint_params = {
         'Rid': Rid,
         'weekday': weekday,
         'startid': startid,
         'endid': endid,
         'longterm': is_longterm,
-        'start_week': start_week,
+        'year': year,
+        'month': month,
+        'day': day,
     }
     room = Room.objects.get(Rid=Rid)
-    # 表单参数都统一为可预约的第一周，具体预约哪周根据POST的start_week判断
-    dayrange_list = web_func.get_dayrange(day_offset=0)[0]
-    for day in dayrange_list:
-        if day['weekday'] == appoint_params['weekday']:
-            appoint_params['date'] = day['date']
-            appoint_params['starttime'], valid = web_func.get_hour_time(
-                room, appoint_params['startid'])
-            assert valid is True
-            appoint_params['endtime'], valid = web_func.get_hour_time(
-                room, appoint_params['endid'] + 1)
-            assert valid is True
-            appoint_params['year'] = day['year']
-            appoint_params['month'] = day['month']
-            appoint_params['day'] = day['day']
-            # 最小人数下限控制
-            appoint_params['Rmin'] = room.Rmin
-            if start_week == 0 and datetime.now().strftime(
-                    "%a") == appoint_params['weekday']:
-                appoint_params['Rmin'] = min(CONFIG.today_min,
-                                             room.Rmin)
-            break
+    appoint_params['date'] = target_date.strftime("%d %b")
+    appoint_params['starttime'], valid = web_func.get_hour_time(
+        room, appoint_params['startid'])
+    assert valid is True
+    appoint_params['endtime'], valid = web_func.get_hour_time(
+        room, appoint_params['endid'] + 1)
+    assert valid is True
+    # 最小人数下限控制
+    appoint_params['Rmin'] = room.Rmin
+    if target_date == datetime.now().date() and datetime.now().strftime(
+            "%a") == appoint_params['weekday']:
+        appoint_params['Rmin'] = min(CONFIG.today_min,
+                                     room.Rmin)
     appoint_params['Sid'] = applicant.get_id()
     appoint_params['Sname'] = applicant.name
 
@@ -824,9 +834,6 @@ def checkout_appoint(request: UserRequest):
                               *map(int, contents['starttime'].split(":")))
         end_time = datetime(contents['year'], contents['month'], contents['day'],
                             *map(int, contents['endtime'].split(":")))
-        # TODO: 隔周预约的处理可优化，根据start_week调整实际预约时间
-        start_time += timedelta(weeks=start_week)
-        end_time += timedelta(weeks=start_week)
         if my_messages.get_warning(render_context)[0] is None:
             # 参数检查全部通过，下面开始创建预约
             appoint_type = Appoint.Type.NORMAL
@@ -836,6 +843,7 @@ def checkout_appoint(request: UserRequest):
                 _notify = False
             elif is_interview:
                 appoint_type = Appoint.Type.INTERVIEW
+            print('start time and end time:', start_time, end_time)
             response = _add_appoint(contents, start_time, end_time, non_yp_num=non_yp_num,
                                     type=appoint_type, notify_create=_notify)
             appoint, err_msg = response

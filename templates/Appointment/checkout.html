@@ -194,24 +194,6 @@
                                                         </div>
                                                         <div class="col-md-12 col-sm-12">
                                                             <div class="form-group card-label">
-                                                                <label>开始时间</label>
-                                                                <div class="text-secondary"
-                                                                     style="border: 1px solid #dbdbdb;
-                                                                            border-radius: 4px;
-                                                                            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 5%);
-                                                                            height: 50px;
-                                                                            margin-top: -13px;
-                                                                            padding: 15px 15px 0;
-                                                                            transition: border-color .3s;">
-                                                                    <input class="align-middle" name="start_week" type="radio" id="this-week" value="0"/>
-                                                                    <label for="this-week" class="my-0 align-middle" style="font-size:12px;width:3rem;">本周开始</label>
-                                                                    <input class="align-middle ml-1 " name="start_week" type="radio" id="next-week" value="1"/>
-                                                                    <label for="next-week" class="my-0 align-middle" style="font-size:12px;width:3rem;">下周开始</label>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-md-12 col-sm-12">
-                                                            <div class="form-group card-label">
                                                                 <label>时间间隔</label>
                                                                 <div class="text-secondary"
                                                                      style="border: 1px solid #dbdbdb;
@@ -246,7 +228,7 @@
                                             </div>
                                             {% endif %}
                                             {% for k,v in appoint_params.items %}
-                                                {% if k != "longterm" and k != "start_week" %}<input type="hidden" name="{{ k }}" value="{{ v }}"/>{% endif %}
+                                                {% if k != "longterm" %}<input type="hidden" name="{{ k }}" value="{{ v }}"/>{% endif %}
                                             {% endfor %}
                                         </div>
                                         <!-- /Personal Information -->
@@ -390,17 +372,10 @@
         <script>
             // 根据长期预约 checkbox 值显示/隐藏相关表单字段
             let longterm = {{ appoint_params.longterm | yesno:'true,false,false' }}
-            let start_week = {{ appoint_params.start_week | default_if_none:-1 }}
             $(document).ready(function () {
                 if ($("#longterm").length == 0) return;
                 if (longterm) {
                     $("#longterm").prop("checked", true);
-                    if (start_week === 0) {
-                        $("#this-week").prop("checked", true);
-                    }
-                    else if (start_week === 1) {
-                        $("#next-week").prop("checked", true);
-                    }
                     $("#weekly").prop("checked", true);
                     $("#longterm-fields").addClass("active");
                 }
