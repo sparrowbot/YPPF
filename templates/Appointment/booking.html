@@ -90,14 +90,7 @@
                                             </form>
                                             {% if has_longterm_permission %}
                                                 <div id="to-normal-btns" class="mt-3 {{ is_longterm|yesno:'d-flex,d-none,d-none' }}">
-                                                    <button id="to-normal" class="btn btn-sm btn-primary flex-fill mr-1">切换为普通预约</button>
-                                                    {% if target_week == 0 or target_week == None %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&target_week=1">查看下周
-                                                    </a>
-                                                    {% elif target_week == 1 %}
-                                                    <a class="btn btn-sm btn-primary flex-fill" href="/underground/arrange_time?Rid={{ room_object.Rid }}&is_longterm=true&target_week=0">查看本周
-                                                    </a>
-                                                    {% endif %}
+                                                    <button id="to-normal" class="btn btn-sm btn-primary flex-fill">切换为普通预约</button>
                                                 </div>
                                                 <div id="to-longterm-btns" class="mt-3 {{ is_longterm|yesno:'d-none,d-flex,d-flex' }}">
                                                     <button id="to-longterm" class="btn btn-sm btn-primary flex-fill">切换为长期预约</button>
