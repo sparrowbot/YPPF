@@ -332,11 +332,12 @@
 					alert("常规预约时间不能超过3小时!");
 				}
 				else {
-					var wkd = {{ js_weekday| safe}};
 					var urls = "check_out?Rid=" + window.Rid;
-					urls =  urls + "&weekday=" + wkd['weekday'];
 					urls = urls + "&startid=" + window.startid;
 					urls = urls + "&endid=" + window.endid;
+					urls = urls + "&year={{ year }}";
+					urls = urls + "&month={{ month }}";
+					urls = urls + "&day={{ day }}";
 					window.location.href = urls;
 				}
 			}

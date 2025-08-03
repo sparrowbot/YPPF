@@ -72,6 +72,9 @@ class Participant(models.Model):
 
     hidden = models.BooleanField('不可搜索', default=False)
     longterm = models.BooleanField('可长期预约', default=False)
+    # 可查看预约周数：用户可以查看和预约的最大周数（从0开始计数）
+    # 例如：max_target_week=4 表示用户可以查看第 0, 1, 2, 3 周
+    preview_weeks = models.IntegerField('可查看预约周数', default=4)
 
 
     appoint_list: 'AppointManager'
