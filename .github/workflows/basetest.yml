@@ -2,9 +2,9 @@ name: basetest
 
 on:
   push:
-    branches: [ develop, AI-College ]
+    branches: [ develop ]
   pull_request:
-    branches: [ develop, AI-College ]
+    branches: [ develop ]
 
 jobs:
 
