@@ -359,9 +359,6 @@
 					alert("请选择预约时段!");
 				}
 				else { //到这里 说明预约符合要求
-					if(endid - startid > 5){
-                        return alert("常规预约时间不能超过3小时!");
-					}
                     if(endid - startid === 1){
                         if(!confirm("时长30分钟的预约只需点击开始时间块即可。您确定要发起时长1小时的预约吗?")) return;
                     }
