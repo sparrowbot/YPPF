@@ -307,8 +307,11 @@ def index(request):  # 主页
         # TODO: perm check optimization?
         rooms = [room for room in rclass.rooms.permitted()
                  if room.check_user_perm(user)]
-        if rooms:
-            reservable_room_classes.append((rclass, rooms))
+        all_rooms = list(rclass.rooms.permitted())  # 所有这个类下可预约的房间\
+
+        if all_rooms:
+            reservable_room_classes.append((rclass, rooms, all_rooms))
+
     quick_reservable_rooms = [
         room for room in Room.objects.permitted()
         if room.check_user_perm(user)
