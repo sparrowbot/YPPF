@@ -651,13 +651,6 @@ def _add_appoint(contents: dict, start: datetime, finish: datetime, non_yp_num: 
     if contents.get('longterm') != 'on' and 2 * len(students) < create_min:
         return _error('院内使用人数需要达到房间最小人数的一半！')
 
-    # 预约是否超过3小时
-    # 检查预约时间合法性由create_appoint完成
-    try:
-        assert finish <= start + timedelta(hours=3)
-    except:
-        return _error('预约时长不能超过3小时！')
-
     try:
         usage: str = contents['Ausage']
         announcement: str = contents['announcement']
@@ -696,7 +689,6 @@ def checkout_appoint(request: UserRequest):
         is_longterm = True if request.GET.get('longterm') == 'on' else False
         is_interview = False
     else:
-        print('checkout_appoint POST:', request.POST)
         Rid = request.POST.get('Rid')
         startid = request.POST.get('startid')
         endid = request.POST.get('endid')
@@ -856,7 +848,6 @@ def checkout_appoint(request: UserRequest):
                 _notify = False
             elif is_interview:
                 appoint_type = Appoint.Type.INTERVIEW
-            print('start time and end time:', start_time, end_time)
             response = _add_appoint(contents, start_time, end_time, non_yp_num=non_yp_num,
                                     type=appoint_type, notify_create=_notify)
             appoint, err_msg = response
