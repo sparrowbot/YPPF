@@ -10,7 +10,7 @@ import xlwt
 import imghdr
 from django.contrib import auth
 from django.shortcuts import redirect
-from utils.http.dependency import HttpResponse, HttpRequest, UserRequest
+from utils.http import HttpResponse, HttpRequest, UserRequest
 
 from utils.http.utils import get_ip
 from app.utils_dependency import *
@@ -236,7 +236,8 @@ def get_sidebar_and_navbar(user: User, navbar_name="", title_name=""):
         bar_display.update(
             profile_name="小组主页",
             profile_url="/orginfo/",
-            is_course=me.otype.otype_name == CONFIG.course.type_name,
+            # For AI college, there are no "course" orgs.
+            is_course=False,
         )
 
     # 个人组织都可以预约
