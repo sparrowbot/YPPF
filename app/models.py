@@ -76,6 +76,7 @@ __all__ = [
     'Activity',
     'ActivityPhoto',
     'Participation',
+    'HomepageImage'
 ]
 
 
@@ -1345,35 +1346,31 @@ class ModifyRecord(models.Model):
     time = models.DateTimeField('修改时间', auto_now_add=True)
 
 
-# class ActivitySummary(models.Model):
-#     class Meta:
-#         verbose_name = "3.活动总结"
-#         verbose_name_plural = verbose_name
-#         ordering = ["-time"]
+class HomepageImageManager(models.Manager['HomepageImage']):
+    def activated(self):
+        return self.filter(activated=True)
 
-#     class Status(models.IntegerChoices):
-#         WAITING = (0, "待审核")
-#         CONFIRMED = (1, "已通过")
-#         CANCELED = (2, "已取消")
-#         REFUSED = (3, "已拒绝")
 
-#     activity = models.ForeignKey(Activity, on_delete=models.CASCADE)
+class HomepageImage(models.Model):
+    '''首页上展示的功能介绍图片。之前叫做 guide pictures. 不包含活动宣传、活动总结的图片。
 
-#     status = models.SmallIntegerField(choices=Status.choices, default=0)
-#     image = models.ImageField(upload_to=f"ActivitySummary/photo/%Y/%m/",
-#                               verbose_name='活动总结图片', null=True, blank=True)
-#     time = models.DateTimeField("申请时间", auto_now_add=True)
+    sort_id 域记录的是图片在首页展示时的相对顺序。这个数字越小，越靠前展示。数字相同的图片将以随机顺序展示。
+    
+    '''
+    class Meta:
+        verbose_name = "首页图片"
+        verbose_name_plural = verbose_name
 
-#     def __str__(self):
-#         return f'{self.activity.title}活动总结'
+    redirect_url = models.CharField(
+        "跳转URL", max_length=50, default="", blank=True)
+    image = models.ImageField("图片", upload_to="homepage_image/")
+    description = models.CharField(
+        "图片说明", max_length=50, default="", blank=True)
+    upload_date = models.DateTimeField("上传时间", auto_now_add=True)
+    sort_id = models.SmallIntegerField("展示顺序", default=0)
+    activated = models.BooleanField("是否启用", default=True)
 
-#     def is_pending(self):  # 表示是不是pending状态
-#         return self.status == ActivitySummary.Status.WAITING
+    def __str__(self):
+        return self.image.name + ' ' + self.description
 
-#     @necessary_for_frontend('activity.organization_id')
-#     def get_org(self):
-#         return self.activity.organization_id
-
-#     @necessary_for_frontend('activity.title', '__str__')
-#     def get_audit_display(self):
-#         return f'{self.activity.title}总结'
+    objects: HomepageImageManager = HomepageImageManager()

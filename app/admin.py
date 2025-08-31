@@ -8,7 +8,7 @@ from django.http import HttpResponse
 from django.urls import path, reverse
 from django.shortcuts import render, redirect
 from django.contrib import admin, messages
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.db import transaction
 from django import forms
 from django.utils.translation import gettext_lazy as _
@@ -763,6 +763,32 @@ class ModifyOrganizationAdmin(admin.ModelAdmin):
         for application in queryset:
             accept_modifyorg_submit(application)
         self.message_user(request, '操作成功完成！')
+
+
+@admin.register(HomepageImage)
+class HomepageImageAdmin(admin.ModelAdmin):
+    actions = []
+    list_display = ['id', 'image', 'description',
+                    'redirect_url', 'activated', 'sort_id']
+    list_filter = ['activated']
+    ordering = ['sort_id']
+    search_fields = ['image', 'description']
+
+    @as_action("显示所选的图片", actions, ['change'], atomic=True, update=True)
+    def activate_selected(self, request, queryset: QuerySet[HomepageImage]):
+        queryset.update(activated=True)
+
+    @as_action("不显示所选的图片", actions, ['change'], atomic=True, update=True)
+    def deactivate_selected(self, request, queryset: QuerySet[HomepageImage]):
+        queryset.update(activated=False)
+
+    @as_action("所选图片展示顺序+1", actions, ['change'], atomic=True, update=True)
+    def increment_sort_id(self, request, queryset: QuerySet[HomepageImage]):
+        queryset.update(sort_id=F('sort_id') + 1)
+
+    @as_action("所选图片展示顺序-1", actions, ['change'], atomic=True, update=True)
+    def decrement_sort_id(self, request, queryset: QuerySet[HomepageImage]):
+        queryset.update(sort_id=F('sort_id') - 1)
 
 
 admin.site.register(OrganizationTag)
