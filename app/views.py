@@ -65,7 +65,7 @@ def shiftAccount(request: HttpRequest):
         arg_url = request.GET["origin"]
         if arg_url.startswith('/'):  # 暂时只允许内部链接
             return redirect(arg_url)
-    return redirect("/underground/")
+    return redirect("/welcome/")
 
 
 # Return content
@@ -601,10 +601,6 @@ def orginfo(request: UserRequest):
 @utils.check_user_access(redirect_url="/logout/")
 @logger.secure_view()
 def homepage(request: UserRequest):
-    # 检查用户类型，如果是组织用户则重定向到组织信息页面
-    if request.user.is_org():
-        return redirect("/orginfo/")
-
     html_display = {}
     my_messages.transfer_message_context(request.GET, html_display)
 
@@ -645,6 +641,7 @@ def homepage(request: UserRequest):
         new_wish = Wishes.objects.create(text=wishtext, background=background)
         new_wish.save()
 
+    # AI 院项目将心愿墙重命名为留言板，代码里的注释就不改了
     # 心愿墙！！！！!最近一周的心愿，已经逆序排列，如果超过100个取前100个就可
     wishes = Wishes.objects.filter(
         time__gt=nowtime - timedelta(days=7)
@@ -670,33 +667,6 @@ def homepage(request: UserRequest):
     if len(homepage_image) == 0:
         homepage_image.append(
             ('/static/assets/img/AI_college_bg2.jpg', ''))
-
-    # -----------------------------天气---------------------------------
-    # TODO: Put get_weather somewhere else
-    from app.jobs import get_weather
-    _weather = get_weather()
-    if _weather.get('modify_time') is None:
-        update_time_delta = timedelta(0)
-    else:
-        update_time_delta = datetime.now() - datetime.strptime(
-            _weather['modify_time'], '%Y-%m-%d %H:%M:%S.%f')
-    html_display['weather'] = _weather
-    # 根据更新时间长短，展示不同的更新天气时间状态
-
-
-    def days_hours_minutes_seconds(td):
-        return td.days, td.seconds // 3600, (td.seconds // 60) % 60, td.seconds % 60
-    days, hours, minutes, seconds = days_hours_minutes_seconds(
-        update_time_delta)
-    if days > 0:
-        last_update = f"{days}天前"
-    elif hours > 0:
-        last_update = f"{hours}小时前"
-    elif minutes > 0:
-        last_update = f"{minutes}分钟前"
-    else:
-        last_update = f"{seconds}秒前"
-    # -------------------------------天气结束-------------------------
 
     # 新版侧边栏, 顶栏等的呈现，采用 bar_display, 必须放在render前最后一步
     bar_display = utils.get_sidebar_and_navbar(request.user, "AI生活")
