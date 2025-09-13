@@ -489,55 +489,55 @@ def orginfo(request: UserRequest):
             org.save()
             return redirect("/welcome/")
 
-    # # 该学年、该学期、该小组的 活动的信息,分为 未结束continuing 和 已结束ended ，按时间顺序降序展现
-    # continuing_activities = (
-    #     Activity.objects.activated()
-    #     .filter(organization_id=org)
-    #     .filter(
-    #         status__in=[
-    #             Activity.Status.REVIEWING,
-    #             Activity.Status.APPLYING,
-    #             Activity.Status.WAITING,
-    #             Activity.Status.PROGRESSING,
-    #         ]
-    #     )
-    #     .order_by("-start")
-    # )
+    # 该学年、该学期、该小组的 活动的信息,分为 未结束continuing 和 已结束ended ，按时间顺序降序展现
+    continuing_activities = (
+        Activity.objects.activated()
+        .filter(organization_id=org)
+        .filter(
+            status__in=[
+                Activity.Status.REVIEWING,
+                Activity.Status.APPLYING,
+                Activity.Status.WAITING,
+                Activity.Status.PROGRESSING,
+            ]
+        )
+        .order_by("-start")
+    )
 
-    # ended_activities = (
-    #     Activity.objects.activated()
-    #     .filter(organization_id=org)
-    #     .filter(status__in=[Activity.Status.CANCELED, Activity.Status.END])
-    #     .order_by("-start")
-    # )
+    ended_activities = (
+        Activity.objects.activated()
+        .filter(organization_id=org)
+        .filter(status__in=[Activity.Status.CANCELED, Activity.Status.END])
+        .order_by("-start")
+    )
 
-    # # 筛选历史活动，具体为不是这个学期的活动
-    # history_activities = (
-    #     Activity.objects.activated(noncurrent=True)
-    #     .filter(organization_id=org)
-    #     .order_by("-start")
-    # )
+    # 筛选历史活动，具体为不是这个学期的活动
+    history_activities = (
+        Activity.objects.activated(noncurrent=True)
+        .filter(organization_id=org)
+        .order_by("-start")
+    )
 
-    # # 如果是用户登陆的话，就记录一下用户有没有加入该活动，用字典存每个活动的状态，再把字典存在列表里
+    # 如果是用户登陆的话，就记录一下用户有没有加入该活动，用字典存每个活动的状态，再把字典存在列表里
 
-    # def _display_activities(activities: QuerySet[Activity]) -> list[dict]:
-    #     displays = []
-    #     for act in activities:
-    #         dictmp = {}
-    #         dictmp["act"] = act
-    #         hours = Activity.EndBeforeHours.prepare_times[act.endbefore]
-    #         dictmp["endbefore"] = act.start - timedelta(hours=hours)
-    #         if request.user.is_person():
-    #             participation = Participation.objects.filter(
-    #                 SQ.sq(Participation.activity, act), SQ.sq(Participation.person, me),
-    #             ).first()
-    #             dictmp["status"] = participation.status if participation else "无记录"
-    #         displays.append(dictmp)
-    #     return displays
+    def _display_activities(activities: QuerySet[Activity]) -> list[dict]:
+        displays = []
+        for act in activities:
+            dictmp = {}
+            dictmp["act"] = act
+            hours = Activity.EndBeforeHours.prepare_times[act.endbefore]
+            dictmp["endbefore"] = act.start - timedelta(hours=hours)
+            if request.user.is_person():
+                participation = Participation.objects.filter(
+                    SQ.sq(Participation.activity, act), SQ.sq(Participation.person, me),
+                ).first()
+                dictmp["status"] = participation.status if participation else "无记录"
+            displays.append(dictmp)
+        return displays
 
-    # continuing_activity_list_participantrec = _display_activities(continuing_activities)
-    # ended_activity_list_participantrec = _display_activities(ended_activities)
-    # history_activity_list_participantrec = _display_activities(history_activities)
+    continuing_activity_list_participantrec = _display_activities(continuing_activities)
+    ended_activity_list_participantrec = _display_activities(ended_activities)
+    history_activity_list_participantrec = _display_activities(history_activities)
 
     # 判断我是不是老大, 首先设置为false, 然后如果有id和user一样, 就为True
     html_display["isboss"] = False
