@@ -1,0 +1,520 @@
+<!-- 独立页面，无模板继承 -->
+<div class="container mt-4">
+    <h2 class="mb-4 text-center">生日祝福投放</h2>
+    <div class="text-center mb-4">
+        <a href="{% url 'birthboard_confirm' %}?tab=participation&mark_seen=1" class="btn mr-2 {% if active_tab == 'participation' %}btn-primary{% else %}btn-outline-primary{% endif %}">参与的{% if tab_change_counts.participation %}({{ tab_change_counts.participation }}){% endif %}</a>
+        <a href="{% url 'birthboard_confirm' %}?tab=received&mark_seen=1" class="btn mr-2 {% if active_tab == 'received' %}btn-primary{% else %}btn-outline-primary{% endif %}">被祝福的{% if tab_change_counts.received %}({{ tab_change_counts.received }}){% endif %}</a>
+        <a href="{% url 'birthboard_confirm' %}?tab=finished&mark_seen=1" class="btn {% if active_tab == 'finished' %}btn-primary{% else %}btn-outline-primary{% endif %}">结束的{% if tab_change_counts.finished %}({{ tab_change_counts.finished }}){% endif %}</a>
+    </div>
+    {% if message %}
+        <div class="alert alert-info">{{ message }}</div>
+    {% endif %}
+
+    {% if active_tab == 'finished' %}
+        {% if finished_activity_list %}
+            {% for activity in finished_activity_list %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <strong>投放日期：</strong> {{ activity.date }}
+                    {% if activity.is_sender %}
+                        <span class="ml-3"><strong>被祝福人：</strong>{{ activity.receiver_name }}</span>
+                        <span class="ml-3"><strong>元气值开销：</strong>{{ activity.per_cost }}</span>
+                    {% endif %}
+                    {% if activity.is_receiver and not activity.is_anonymous %}
+                        <span class="ml-3"><strong>送出人：</strong>
+                            {% for sender in activity.senders %}{{ sender.user.get_full_name|default:sender.user.username }}{% if not forloop.last %}、{% endif %}{% endfor %}
+                        </span>
+                    {% endif %}
+                    <span class="ml-3"><strong>流程状态：</strong>{% if activity.is_changed %}<strong>{{ activity.record_status }}</strong>{% else %}{{ activity.record_status }}{% endif %}</span>
+                </div>
+                <div class="card-body">
+                    {% if activity.image %}
+                    <img src="{{ activity.image }}" alt="祝福图片" class="img-fluid mb-3" style="max-width: 400px; cursor: pointer;" onclick="showFullscreenImage(this.src)">
+                    {% endif %}
+                    <div class="mt-2 text-secondary">
+                        {% if activity.record_status == 'terminated' %}
+                            已终止
+                        {% elif activity.record_status == 'canceled' %}
+                            已撤销
+                        {% elif activity.record_status == 'finished' %}
+                            已完成
+                        {% elif activity.record_status == 'terminated_by_admin' %}
+                            已被管理员驳回
+                            {% if activity.rejected_reasons or activity.rejected_detail %}
+                                <div class="alert alert-danger mt-2">
+                                    <div><strong>驳回原因：</strong>
+                                        {% if activity.rejected_reasons %}
+                                            {{ activity.rejected_reasons|join:'，' }}
+                                        {% endif %}
+                                    </div>
+                                    <div><strong>详细说明：</strong> {{ activity.rejected_detail }}</div>
+                                </div>
+                            {% endif %}
+                            {% if activity.is_sender and activity.senders.0.user.id == current_user.id %}
+                                <form method="post" action="{% url 'birthboard_confirm' %}" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="tab" value="finished">
+                                    <input type="hidden" name="resubmit_id" value="{{ activity.id }}">
+                                    <button type="submit" class="btn btn-primary mt-2">重新提交</button>
+                                </form>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info text-center">暂无已结束的投放记录。</div>
+        {% endif %}
+    {% elif active_tab == 'received' %}
+        {% if received_activity_list %}
+            {% for activity in received_activity_list %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <strong>投放日期：</strong> {{ activity.date }}
+                    {% if not activity.is_anonymous %}
+                        <span class="ml-3"><strong>送出人：</strong>
+                            {% for user in activity.senders %}{{ user.get_full_name|default:user.username }}{% if not forloop.last %}、{% endif %}{% endfor %}
+                        </span>
+                    {% endif %}
+                    <span class="ml-3"><strong>流程状态：</strong>{% if activity.is_changed %}<strong>{{ activity.record_status }}</strong>{% else %}{{ activity.record_status }}{% endif %}</span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">送你神秘大礼！</div>
+                    {% if activity.record_status == 'terminated' %}
+                        <div class="mt-2 text-secondary">已终止</div>
+                    {% elif activity.record_status == 'canceled' %}
+                        <div class="mt-2 text-secondary">已撤销</div>
+                    {% elif activity.record_status == 'terminated_by_admin' %}
+                        <div class="mt-2 text-danger font-weight-bold">已被管理员驳回</div>
+                        {% if activity.rejected_reasons or activity.rejected_detail %}
+                            <div class="alert alert-danger mt-2">
+                                <div><strong>驳回原因：</strong>
+                                    {% if activity.rejected_reasons %}
+                                        {{ activity.rejected_reasons|join:'，' }}
+                                    {% endif %}
+                                </div>
+                                <div><strong>详细说明：</strong> {{ activity.rejected_detail }}</div>
+                            </div>
+                        {% endif %}
+                    {% elif activity.record_status == 'ready' or activity.record_status == 'ongoing' %}
+                        {% if birthboard_update_in_progress %}
+                            <button type="button" class="btn btn-warning mt-3" disabled>撤销</button>
+                            <div class="text-muted small mt-1">23点45-24点系统同步中，无法操作</div>
+                        {% else %}
+                            <button type="button" class="btn btn-warning mt-3" onclick="showRevokeModal('{{ activity.id }}')" title="撤销此投放活动（不会退款）">撤销</button>
+                        {% endif %}
+                    {% elif activity.receiver_status == 'confirmed' %}
+                        <div class="mt-2 text-success">已确认</div>
+                    {% elif activity.receiver_status == 'rejected' %}
+                        <div class="mt-2 text-danger">已拒绝</div>
+                    {% elif activity.receiver_status == 'wait' %}
+                        <div id="preview-choice-{{ activity.id }}">
+                            <label class="mr-2">是否想过目投放图片？</label>
+                            <button type="button" class="btn btn-outline-primary btn-sm mr-2" onclick="showPreviewConfirmModal('{{ activity.id }}')">想过目</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showPreviewAndButtons('{{ activity.id }}', false)">不需要</button>
+                        </div>
+                        <div id="preview-confirm-modal-{{ activity.id }}" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+                            <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                                <div style="margin-bottom:18px;">真的吗？人家还想给你一个惊喜呢~</div>
+                                <button class="btn btn-primary mr-2" onclick="confirmPreview('{{ activity.id }}')">确认过目</button>
+                                <button class="btn btn-secondary" onclick="cancelPreview('{{ activity.id }}')">算了</button>
+                            </div>
+                        </div>
+                        <div id="preview-img-{{ activity.id }}" style="display:none;">
+                            {% if activity.image %}
+                                <img src="{{ activity.image }}" alt="祝福图片" class="img-fluid mb-3" style="max-width: 400px; cursor: pointer;" onclick="showFullscreenImage(this.src)">
+                            {% endif %}
+                        </div>
+                        <div id="action-btns-{{ activity.id }}" style="display:none;">
+                            <form method="post" class="d-inline-block">
+                                {% csrf_token %}
+                                <input type="hidden" name="tab" value="received">
+                                <input type="hidden" name="record_id" value="{{ activity.id }}">
+                                <button type="submit" class="btn btn-success">确认</button>
+                            </form>
+                            <button type="button" class="btn btn-danger ml-2" onclick="showRejectModal('{{ activity.id }}')">拒绝</button>
+                            {% if activity.image %}
+                                <button type="button" id="preview-btn-{{ activity.id }}" class="btn btn-outline-primary ml-2" onclick="showPreviewConfirmModal('{{ activity.id }}')">想过目</button>
+                            {% endif %}
+                        </div>
+                        <script>
+                        function showPreviewConfirmModal(id) {
+                            document.getElementById('preview-confirm-modal-' + id).style.display = '';
+                        }
+                        function confirmPreview(id) {
+                            document.getElementById('preview-confirm-modal-' + id).style.display = 'none';
+                            showPreviewAndButtons(id, true);
+                        }
+                        function cancelPreview(id) {
+                            document.getElementById('preview-confirm-modal-' + id).style.display = 'none';
+                        }
+                        function showPreviewAndButtons(id, wantPreview) {
+                            document.getElementById('preview-choice-' + id).style.display = 'none';
+                            document.getElementById('preview-img-' + id).style.display = wantPreview ? '' : 'none';
+                            document.getElementById('action-btns-' + id).style.display = '';
+                            if (wantPreview) {
+                                const previewBtn = document.getElementById('preview-btn-' + id);
+                                if (previewBtn) previewBtn.style.display = 'none';
+                            }
+                        }
+                        </script>
+                    {% endif %}
+                    <div id="rejectModal" class="modal" tabindex="-1" style="display:none; position:fixed; z-index:1050; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+                        <div class="modal-dialog" style="margin:10vh auto; max-width:400px;">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">确认拒绝</h5>
+                                    <button type="button" class="close" onclick="hideRejectModal()">&times;</button>
+                                </div>
+                                <div class="modal-body">
+                                    <p>确定要拒绝该祝福投放吗？此操作不可撤销。</p>
+                                </div>
+                                <div class="modal-footer">
+                                    <form id="rejectForm" method="post" style="display:inline;">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="tab" value="received">
+                                        <input type="hidden" name="reject_id" id="reject_id_input">
+                                        <button type="submit" class="btn btn-danger">确定拒绝</button>
+                                    </form>
+                                    <button type="button" class="btn btn-secondary" onclick="hideRejectModal()">取消</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="revokeModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+                        <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                            <div style="margin-bottom:18px;">确定要撤销此投放活动吗？（不会退款）</div>
+                            <button id="revoke-cancel-btn" style="margin-right:18px;">取消</button>
+                            <button id="revoke-confirm-btn">确定撤销</button>
+                        </div>
+                    </div>
+                    <script>
+                    const receivedTab = 'received';
+                    let receivedPendingRevokeRecordId = null;
+
+                    function showRejectModal(id) {
+                        document.getElementById('reject_id_input').value = id;
+                        document.getElementById('rejectModal').style.display = 'block';
+                    }
+                    function hideRejectModal() {
+                        document.getElementById('rejectModal').style.display = 'none';
+                    }
+                    document.getElementById('rejectModal').addEventListener('click', function(e) {
+                        if (e.target === this) hideRejectModal();
+                    });
+
+                    function showRevokeModal(recordId) {
+                        receivedPendingRevokeRecordId = recordId;
+                        document.getElementById('revokeModal').style.display = 'block';
+                    }
+                    function hideRevokeModal() {
+                        document.getElementById('revokeModal').style.display = 'none';
+                        receivedPendingRevokeRecordId = null;
+                    }
+                    document.getElementById('revoke-confirm-btn').addEventListener('click', function() {
+                        if (receivedPendingRevokeRecordId) {
+                            const form = document.createElement('form');
+                            form.method = 'post';
+                            form.innerHTML = '<input type="hidden" name="tab" value="' + receivedTab + '"><input type="hidden" name="revoke_id" value="' + receivedPendingRevokeRecordId + '"><input type="hidden" name="csrfmiddlewaretoken" value="' + getCookie('csrftoken') + '">';
+                            document.body.appendChild(form);
+                            form.submit();
+                        }
+                    });
+                    document.getElementById('revoke-cancel-btn').addEventListener('click', function() {
+                        hideRevokeModal();
+                    });
+                    document.getElementById('revokeModal').addEventListener('click', function(e) {
+                        if (e.target === this) hideRevokeModal();
+                    });
+                    function getCookie(name) {
+                        let cookieValue = null;
+                        if (document.cookie && document.cookie !== '') {
+                            const cookies = document.cookie.split(';');
+                            for (let i = 0; i < cookies.length; i++) {
+                                const cookie = cookies[i].trim();
+                                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                                    break;
+                                }
+                            }
+                        }
+                        return cookieValue;
+                    }
+                    </script>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info text-center">暂无待你确认的祝福。</div>
+        {% endif %}
+    {% else %}
+        {% if participation_activity_list %}
+            {% for activity in participation_activity_list %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <strong>投放日期：</strong> {{ activity.date }}
+                    <span class="ml-3"><strong>被祝福人：</strong>{{ activity.receiver_name }}</span>
+                    <span class="ml-3"><strong>元气值开销：</strong>{{ activity.per_cost }}</span>
+                    <span class="ml-3"><strong>匿名：</strong>{% if activity.is_anonymous %}是{% else %}否{% endif %}</span>
+                    <span class="ml-3"><strong>投放方式：</strong>{{ activity.mode }}</span>
+                    <span class="ml-3"><strong>流程状态：</strong>{% if activity.is_changed %}<strong>{{ activity.record_status }}</strong>{% else %}{{ activity.record_status }}{% endif %}</span>
+                </div>
+                <div class="card-body">
+                    {% if activity.image %}
+                    <img src="{{ activity.image }}" alt="祝福图片" class="img-fluid mb-3" style="max-width: 400px; cursor: pointer;" onclick="showFullscreenImage(this.src)">
+                    {% endif %}
+                    {% if not activity.terminated and activity.record_status != 'canceled' %}
+                    <h5>参与送出人：</h5>
+                    <ul class="list-group">
+                        {% for sender in activity.senders %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            {{ sender.user.get_full_name|default:sender.user.username }}
+                            {% if sender.user.id in activity.paid_ids %}
+                            <span class="badge badge-info">已支付</span>
+                            {% elif sender.user.id in activity.confirmed_ids %}
+                            <span class="badge badge-success">已确认</span>
+                            {% else %}
+                            <span class="badge badge-warning">待确认</span>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    {% if activity.terminated or activity.record_status == 'canceled' %}
+                        <div class="mt-3 text-danger font-weight-bold">已终止</div>
+                    {% elif activity.terminated_by_admin %}
+                        <div class="mt-3 text-danger font-weight-bold">已被管理员驳回</div>
+                        {% if activity.rejected_reasons or activity.rejected_detail %}
+                            <div class="alert alert-danger mt-2">
+                                <div><strong>驳回原因：</strong>
+                                    {% if activity.rejected_reasons %}
+                                        {{ activity.rejected_reasons|join:'，' }}
+                                    {% endif %}
+                                </div>
+                                <div><strong>详细说明：</strong> {{ activity.rejected_detail }}</div>
+                            </div>
+                        {% endif %}
+                        {% if activity.senders.0.user.id == current_user.id %}
+                            <form method="post" action="{% url 'birthboard_confirm' %}" style="display:inline;">
+                                {% csrf_token %}
+                                <input type="hidden" name="tab" value="participation">
+                                <input type="hidden" name="resubmit_id" value="{{ activity.id }}">
+                                <button type="submit" class="btn btn-primary">重新提交</button>
+                            </form>
+                        {% endif %}
+                    {% elif activity.is_rejected %}
+                        <div class="mt-3 text-danger font-weight-bold">已拒绝</div>
+                    {% elif activity.record_status == 'ready' or activity.record_status == 'ongoing' %}
+                        {% if birthboard_update_in_progress %}
+                            <button type="button" class="btn btn-warning mt-3" disabled>撤销</button>
+                            <div class="text-muted small mt-1">23点45-24点系统同步中，无法操作</div>
+                        {% else %}
+                            <button type="button" class="btn btn-warning mt-3" onclick="showRevokeModal('{{ activity.id }}')" title="撤销此投放活动（不会退款）">撤销</button>
+                        {% endif %}
+                    {% elif activity.is_initiator and not activity.terminated and not activity.terminated_by_admin %}
+                        <button type="button" class="btn btn-danger mt-3" onclick="showAbortModal('{{ activity.id }}')" title="中止投放并退款">中止投放</button>
+                    {% elif activity.has_paid %}
+                        <div class="mt-3 text-info font-weight-bold">你已支付</div>
+                    {% elif not activity.has_confirmed %}
+                        <form method="post" class="mt-3 d-inline" id="confirm-form-{{ activity.id }}">
+                            {% csrf_token %}
+                            <input type="hidden" name="tab" value="participation">
+                            <input type="hidden" name="record_id" value="{{ activity.id }}">
+                            <button type="button" class="btn btn-primary" onclick="checkBalanceBeforeConfirm('{{ activity.id }}')">确认</button>
+                        </form>
+                        <button type="button" class="btn btn-danger ml-2 mt-3 d-inline" onclick="showRejectModal('{{ activity.id }}')">拒绝</button>
+                    {% else %}
+                        <div class="mt-3 text-success">你已确认</div>
+                    {% endif %}
+                    {% if activity.waiting_accept %}
+                    <div class="mt-2 alert alert-warning">等待{{ activity.waiting_accept_name }}确认中。</div>
+                    {% endif %}
+                    {% if activity.is_charged %}
+                    <div class="mt-2 text-info">已扣款</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info text-center">暂无你参与的祝福投放记录。</div>
+        {% endif %}
+
+        <div id="revokeModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+            <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                <div style="margin-bottom:18px;">确定要撤销此投放活动吗？（不会退款）</div>
+                <button id="revoke-cancel-btn" style="margin-right:18px;">取消</button>
+                <button id="revoke-confirm-btn">确定撤销</button>
+            </div>
+        </div>
+        <div id="insufficientBalanceModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+            <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                <div id="insufficient-balance-text" style="margin-bottom:18px;">当前余额为0，余额不足。</div>
+                <button id="insufficient-balance-confirm-btn">确认</button>
+            </div>
+        </div>
+        <div id="confirmChargeModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+            <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                <div style="margin-bottom:18px;">确认要支付并参与祝福投放吗？（提交后不可撤销）</div>
+                <button id="confirm-modal-cancel-btn" style="margin-right:18px;">取消</button>
+                <button id="confirm-modal-confirm-charge-btn">确认支付</button>
+            </div>
+        </div>
+        <div id="rejectModal" class="modal" tabindex="-1" style="display:none; position:fixed; z-index:1050; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+            <div class="modal-dialog" style="margin:10vh auto; max-width:400px;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">确认拒绝</h5>
+                        <button type="button" class="close" onclick="hideRejectModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p>确定要拒绝该祝福投放吗？此操作不可撤销。</p>
+                    </div>
+                    <div class="modal-footer">
+                        <form id="rejectForm" method="post" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="tab" value="participation">
+                            <input type="hidden" name="reject_id" id="reject_id_input">
+                            <button type="submit" class="btn btn-danger">确定拒绝</button>
+                        </form>
+                        <button type="button" class="btn btn-secondary" onclick="hideRejectModal()">取消</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="abortModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+            <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+                <div style="margin-bottom:18px;">确定要中止投放并退款吗？此操作不可撤销。</div>
+                <button id="abort-cancel-btn" style="margin-right:18px;">取消</button>
+                <button id="abort-confirm-btn">确定中止</button>
+            </div>
+        </div>
+        <script>
+        const currentUsername = "{{ current_user.username|escapejs }}";
+        const participationTab = 'participation';
+        let pendingConfirmRecordId = null;
+        let participationPendingRevokeRecordId = null;
+        let participationPendingAbortRecordId = null;
+
+        function getCookie(name) {
+            const cookieValue = document.cookie.split('; ').find(row => row.startsWith(name + '='));
+            return cookieValue ? decodeURIComponent(cookieValue.split('=')[1]) : null;
+        }
+
+        function openConfirmChargeModal(recordId) {
+            pendingConfirmRecordId = recordId;
+            document.getElementById('confirmChargeModal').style.display = 'block';
+        }
+        function closeConfirmChargeModal() {
+            document.getElementById('confirmChargeModal').style.display = 'none';
+            pendingConfirmRecordId = null;
+        }
+        function showInsufficientBalanceModal(balance) {
+            document.getElementById('insufficient-balance-text').textContent = '当前余额为' + balance + '，余额不足。';
+            document.getElementById('insufficientBalanceModal').style.display = 'block';
+        }
+        function hideInsufficientBalanceModal() {
+            document.getElementById('insufficientBalanceModal').style.display = 'none';
+        }
+        function checkBalanceBeforeConfirm(recordId) {
+            fetch('/birthboard/api/check_yqpoint/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') || ''
+                },
+                body: JSON.stringify({senders: [currentUsername], record_id: recordId})
+            }).then(resp => resp.json()).then(data => {
+                if (!data.ok || !data.result || !data.result[currentUsername]) {
+                    showInsufficientBalanceModal(0);
+                    return;
+                }
+                const info = data.result[currentUsername];
+                if (!info.enough) {
+                    showInsufficientBalanceModal(info.balance);
+                    return;
+                }
+                openConfirmChargeModal(recordId);
+            }).catch(() => showInsufficientBalanceModal(0));
+        }
+        document.getElementById('confirm-modal-confirm-charge-btn').addEventListener('click', function() {
+            if (pendingConfirmRecordId) {
+                document.getElementById('confirm-form-' + pendingConfirmRecordId).submit();
+            }
+        });
+        document.getElementById('confirm-modal-cancel-btn').addEventListener('click', closeConfirmChargeModal);
+        document.getElementById('insufficient-balance-confirm-btn').addEventListener('click', hideInsufficientBalanceModal);
+        function showRevokeModal(recordId) {
+            participationPendingRevokeRecordId = recordId;
+            document.getElementById('revokeModal').style.display = 'block';
+        }
+        function hideRevokeModal() {
+            document.getElementById('revokeModal').style.display = 'none';
+            participationPendingRevokeRecordId = null;
+        }
+        document.getElementById('revoke-confirm-btn').addEventListener('click', function() {
+            if (participationPendingRevokeRecordId) {
+                const form = document.createElement('form');
+                form.method = 'post';
+                form.innerHTML = '<input type="hidden" name="tab" value="' + participationTab + '"><input type="hidden" name="revoke_id" value="' + participationPendingRevokeRecordId + '"><input type="hidden" name="csrfmiddlewaretoken" value="' + getCookie('csrftoken') + '">';
+                document.body.appendChild(form);
+                form.submit();
+            }
+        });
+        document.getElementById('revoke-cancel-btn').addEventListener('click', hideRevokeModal);
+        document.getElementById('revokeModal').addEventListener('click', function(e) { if (e.target === this) hideRevokeModal(); });
+        function showAbortModal(recordId) {
+            participationPendingAbortRecordId = recordId;
+            document.getElementById('abortModal').style.display = 'block';
+        }
+        function hideAbortModal() {
+            document.getElementById('abortModal').style.display = 'none';
+            participationPendingAbortRecordId = null;
+        }
+        document.getElementById('abort-confirm-btn').addEventListener('click', function() {
+            if (participationPendingAbortRecordId) {
+                const form = document.createElement('form');
+                form.method = 'post';
+                form.innerHTML = '<input type="hidden" name="tab" value="' + participationTab + '"><input type="hidden" name="abort_id" value="' + participationPendingAbortRecordId + '"><input type="hidden" name="csrfmiddlewaretoken" value="' + getCookie('csrftoken') + '">';
+                document.body.appendChild(form);
+                form.submit();
+            }
+        });
+        document.getElementById('abort-cancel-btn').addEventListener('click', hideAbortModal);
+        document.getElementById('abortModal').addEventListener('click', function(e) { if (e.target === this) hideAbortModal(); });
+        function showRejectModal(id) {
+            document.getElementById('reject_id_input').value = id;
+            document.getElementById('rejectModal').style.display = 'block';
+        }
+        function hideRejectModal() {
+            document.getElementById('rejectModal').style.display = 'none';
+        }
+        document.getElementById('rejectModal').addEventListener('click', function(e) { if (e.target === this) hideRejectModal(); });
+        document.getElementById('confirmChargeModal').addEventListener('click', function(e) { if (e.target === this) closeConfirmChargeModal(); });
+        document.getElementById('insufficientBalanceModal').addEventListener('click', function(e) { if (e.target === this) hideInsufficientBalanceModal(); });
+        </script>
+    {% endif %}
+
+    <div id="fullscreenImageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.9);">
+        <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+            <img id="fullscreenImageContent" style="max-width:90vw; max-height:90vh; cursor:pointer;" onclick="hideFullscreenImage()">
+            <button style="position:absolute; top:20px; right:20px; background:none; border:none; color:white; font-size:32px; cursor:pointer;" onclick="hideFullscreenImage()">&times;</button>
+        </div>
+    </div>
+    <script>
+    function showFullscreenImage(imageSrc) {
+        document.getElementById('fullscreenImageContent').src = imageSrc;
+        document.getElementById('fullscreenImageModal').style.display = 'block';
+    }
+    function hideFullscreenImage() {
+        document.getElementById('fullscreenImageModal').style.display = 'none';
+    }
+    document.getElementById('fullscreenImageModal').addEventListener('click', function(e) {
+        if (e.target === this) hideFullscreenImage();
+    });
+    </script>
+
+    <div class="mt-4 text-center">
+        <a href="/birthboard/" class="btn btn-secondary">返回</a>
+    </div>
+</div>

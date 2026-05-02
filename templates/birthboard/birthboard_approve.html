@@ -1,0 +1,141 @@
+{% load static %}
+<div class="container mt-4">
+    <h2 class="mb-4 text-center">生日祝福投放审核</h2>
+    {% if activity_list %}
+        {% for item in activity_list %}
+        {% with record=item.record is_related=item.is_related %}
+        {% if is_related %}
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="alert alert-warning mt-3 mb-0">此投放活动与你有关，你不能参与审核。</div>
+            </div>
+        </div>
+        {% else %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <strong>提交时间：</strong> {{ record.created_at }}
+                <span class="ml-3"><strong>被祝福人：</strong>{{ record.receiver_name }}</span>
+                <span class="ml-3"><strong>元气值开销：</strong>{{ record.per_cost }}</span>
+                <span class="ml-3"><strong>匿名：</strong>{% if record.is_anonymous %}是{% else %}否{% endif %}</span>
+                <span class="ml-3"><strong>投放方式：</strong>{{ record.mode }}</span>
+                <span class="ml-3"><strong>流程状态：</strong>{{ record.get_status_display }}</span>
+            </div>
+            <div class="card-body">
+                    {% if record.image %}
+                    <img src="{{ record.image.url }}" alt="祝福图片" class="img-fluid mb-3" style="max-width: 400px;">
+                    {% endif %}
+                    {% if record.status == 'canceled' %}
+                    <div class="mt-2 text-secondary">已撤销</div>
+                    {% endif %}
+                    {% if record.status == 'ready' or record.status == 'ongoing' %}
+                    {% if birthboard_update_in_progress %}
+                        <button type="button" class="btn btn-warning mt-3" disabled>撤销</button>
+                        <div class="text-muted small mt-1">23点45-24点系统同步中，无法操作</div>
+                    {% else %}
+                        <button type="button" class="btn btn-warning mt-3" onclick="showRevokeModal('{{ record.id }}')" title="撤销此投放活动（不会退款）">撤销</button>
+                    {% endif %}
+                    <!-- 撤销确认弹窗 -->
+                    <div id="revokeModal-{{ record.id }}" class="modal" tabindex="-1" style="display:none; position:fixed; z-index:1050; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+                        <div class="modal-dialog" style="margin:10vh auto; max-width:400px;">
+                            <div class="modal-content p-3">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">确认撤销</h5>
+                                    <button type="button" class="close" onclick="hideRevokeModal('{{ record.id }}')">&times;</button>
+                                </div>
+                                <div class="modal-body">
+                                    <p>确定要撤销此投放活动吗？（不会退款）</p>
+                                </div>
+                                <div class="modal-footer">
+                                    <form method="post" style="display:inline;">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="revoke_id" value="{{ record.id }}">
+                                        <button type="submit" class="btn btn-warning">确定撤销</button>
+                                    </form>
+                                    <button type="button" class="btn btn-secondary" onclick="hideRevokeModal('{{ record.id }}')">取消</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                    function showRevokeModal(id) {
+                        document.getElementById('revokeModal-' + id).style.display = 'block';
+                    }
+                    function hideRevokeModal(id) {
+                        document.getElementById('revokeModal-' + id).style.display = 'none';
+                    }
+                    </script>
+                    {% endif %}
+                    {% if record.status == 'waiting_approve' %}
+                    <div class="mb-2">
+                        {% if is_first and not record.first_approved %}
+                            <form method="post" class="d-inline-block mr-2" style="vertical-align:middle;">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="approve">
+                                <input type="hidden" name="record_id" value="{{ record.id }}">
+                                <button type="submit" class="btn btn-success">初审通过</button>
+                            </form>
+                            <button type="button" class="btn btn-danger" onclick="showRejectModal('{{ record.id }}')">驳回</button>
+                        {% elif is_second and record.first_approved %}
+                            <form method="post" class="d-inline-block mr-2" style="vertical-align:middle;">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="approve">
+                                <input type="hidden" name="record_id" value="{{ record.id }}">
+                                <button type="submit" class="btn btn-success">终审通过</button>
+                            </form>
+                            <button type="button" class="btn btn-danger" onclick="showRejectModal('{{ record.id }}')">驳回</button>
+                        {% endif %}
+                    </div>
+                    <!-- 驳回弹窗 -->
+                    <div id="rejectModal-{{ record.id }}" class="modal" tabindex="-1" style="display:none; position:fixed; z-index:1050; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+                        <div class="modal-dialog" style="margin:10vh auto; max-width:400px;">
+                            <div class="modal-content p-3">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">驳回原因</h5>
+                                    <button type="button" class="close" onclick="hideRejectModal('{{ record.id }}')">&times;</button>
+                                </div>
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="reject">
+                                    <input type="hidden" name="record_id" value="{{ record.id }}">
+                                    <div class="form-group">
+                                        <label>违规类型（可多选，必选）</label>
+                                        <select class="form-control" name="reasons" id="reasons-{{ record.id }}" multiple required>
+                                            <option value="低俗恶搞">低俗恶搞</option>
+                                            <option value="暴力色情恐怖">暴力色情恐怖</option>
+                                            <option value="诋毁侮辱隐私">诋毁侮辱隐私</option>
+                                            <option value="敏感引战">敏感引战</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>具体违规内容（必填）</label>
+                                        <textarea class="form-control" name="detail" required></textarea>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" onclick="hideRejectModal('{{ record.id }}')">取消</button>
+                                        <button type="submit" class="btn btn-danger">确认驳回</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                    function showRejectModal(id) {
+                        document.getElementById('rejectModal-' + id).style.display = 'block';
+                    }
+                    function hideRejectModal(id) {
+                        document.getElementById('rejectModal-' + id).style.display = 'none';
+                    }
+                    </script>
+                    {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% endfor %}
+    {% else %}
+        <div class="alert alert-info text-center">暂无待审核的祝福。</div>
+    {% endif %}
+    <div class="mt-4 text-center">
+        <a href="{% url 'birthboard' %}" class="btn btn-secondary">返回</a>
+    </div>
+</div>

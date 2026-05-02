@@ -28,12 +28,13 @@ def to_search_indices(
     '''
     if active is not None:
         users = users.filter(active=active)
-    index_values = users.values_list('username', 'name', 'pinyin', 'acronym')
+    index_values = users.values_list('id', 'username', 'name', 'pinyin', 'acronym')
     search_indices = []
     for user in index_values:
-        uid, name, pinyin, acronym = user
+        pk, uid, name, pinyin, acronym = user
         search_indices.append({
-            'id': uid,
+            'id': uid,         # username，前端select2 value
+            'pk': pk,          # pk，提交时查找
             'text': name + uid[:2],
             'pinyin': pinyin,
             'acronym': acronym,

@@ -1,0 +1,586 @@
+{% load static %}
+<div class="container mt-4">
+    <h2 class="mb-4 text-center">欢迎来到生日祝福投放板</h2>
+    <div class="mb-2 text-center text-info">当前登录用户：<strong>{{ request.user.get_full_name|default:request.user.username }}</strong></div>
+    <!-- <p>用户数：{{ users|length }}</p> -->
+    
+    <!-- 调试：输出用户数量和姓名 -->
+    <!-- <ul>
+    {% for user in users %}
+        <li>{{ user.id }} - {{ user.username }} - {% if user.naturalperson %}{{ user.naturalperson.name }}{% else %}无自然人{% endif %}</li>
+    {% endfor %}
+    </ul> -->
+    
+    <!-- 下拉框选项 -->
+   
+    
+    <!-- {% for user in users %}
+    {% if user.naturalperson %}{{ user.naturalperson.name }}{% else %}无自然人{% endif %}
+    {% endfor %} -->
+    
+    <!-- {% for user in users %}
+    <p>{{ user.username }}</p>
+    {% endfor %} -->
+    <form id="birthboard-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <!-- 2. 单选被祝福用户 -->
+        <div class="form-group" id="receiver-group">
+            <label for="receiver">请选择被祝福用户</label>
+            <select class="form-control" id="receiver" name="receiver" style="width:100%"></select>
+            <div class="invalid-feedback text-danger" id="receiver-error" style="display:none;"></div>
+        </div>
+        <!-- 3. 多选送出用户 -->
+        <div class="form-group" id="senders-group">
+            <label for="senders">请选择送出祝福的用户（可多选）</label>
+            <select class="form-control" id="senders" name="senders" multiple style="width:100%"></select>
+            <div class="invalid-feedback text-danger" id="senders-error" style="display:none;"></div>
+            <div class="mt-2">
+                <strong>已选择：</strong><span id="selected-senders-list">无</span>
+            </div>
+        </div>
+        <!-- 4. 图片、时间、模式选择 -->
+        <div class="form-row">
+            <div class="form-group col-md-3">
+                <label for="date">投放日期</label>
+                <input type="date" class="form-control" id="date" name="date">
+            </div>
+            <div class="form-group col-md-3">
+                <label for="mode">投放模式</label>
+                <select class="form-control" id="mode" name="mode">
+                    <option value="0">35元气值/1天</option>
+                    <option value="1">60元气值/3天</option>
+                    <option value="2">1000元气值/1年</option>
+                </select>
+            </div>
+            <div class="form-group col-md-6" id="image-group">
+                <label for="image">上传图片（1920x1080, 72/96dpi）</label>
+                <input type="file" class="form-control-file" id="image" name="image" accept="image/*">
+                <div class="invalid-feedback text-danger" id="image-error" style="display:none;"></div>
+            </div>
+        </div>
+        <!-- 5. 消耗、匿名、提交 -->
+        <div class="form-row align-items-center">
+            <div class="col-md-4">
+                <label>每人消耗元气值：</label>
+                <span id="cost-per-user">-</span>
+            </div>
+            <div class="col-md-4">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="is_anonymous" name="is_anonymous">
+                    <label class="form-check-label" for="is_anonymous">匿名（默认不匿名）</label>
+                </div>
+            </div>
+            <div class="col-md-4 text-right">
+                <button type="submit" class="btn btn-primary">确认提交</button>
+                <a href="/birthboard/confirm/" class="btn btn-outline-info ml-2">查看确认页面{% if confirm_tab_total_count %}({{ confirm_tab_total_count }}){% endif %}</a>
+            </div>
+        </div>
+    </form>
+
+<!-- 纯HTML自定义确认扣款弹窗 -->
+<div id="confirmChargeModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+    <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+        <div style="margin-bottom:18px;">确认要提交并立即扣除您的元气值吗？（提交后不可撤销）</div>
+        <button id="modal-cancel-btn" style="margin-right:18px;">取消</button>
+        <button id="modal-confirm-charge-btn">确认扣款</button>
+    </div>
+</div>
+
+<!-- 余额不足提示弹窗 -->
+<div id="insufficientBalanceModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+    <div style="background:#fff; max-width:350px; margin:15vh auto; padding:24px 20px; text-align:center;">
+        <div id="insufficient-balance-text" style="margin-bottom:18px;">当前余额为0，余额不足。</div>
+        <button id="insufficient-balance-confirm-btn">确认</button>
+    </div>
+</div>
+
+<!-- 今日生日提醒弹窗 -->
+<div id="todayReminderModal" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4);">
+    <div style="background:#fff; max-width:380px; margin:15vh auto; padding:24px 20px; text-align:center;">
+        <div id="today-reminder-text" style="margin-bottom:18px;"></div>
+        <button id="today-reminder-confirm-btn">确定</button>
+    </div>
+</div>
+
+
+<!-- jQuery 必须在 select2 之前引入 -->
+<script src="{% static 'Appointment/assets/js/jquery.min.js' %}"></script>
+<link href="{% static 'Appointment/assets/select2/css/select2.min.css' %}" rel="stylesheet" />
+<script src="{% static 'Appointment/assets/select2/js/select2.min.js' %}"></script>
+<script src="{% static 'assets/js/select2/user-matcher.js' %}"></script>
+
+{{ json_context | json_script:'context-data' }}
+{% if birthboard_initial %}
+<script id="birthboard-initial-data" type="application/json">{{ birthboard_initial|safe }}</script>
+{% endif %}
+{{ insufficient_balance|default:''|json_script:'insufficient-balance-data' }}
+{{ today_entry_reminders|default:''|json_script:'today-entry-reminders-data' }}
+{{ birthboard_date_rule|default:''|json_script:'birthboard-date-rule-data' }}
+<script>
+// 投放模式消耗
+const modeCost = [35, 60, 1000];
+
+$(document).ready(function(){
+    // 自动预填逻辑
+    var initialData = null;
+    var initialScript = document.getElementById('birthboard-initial-data');
+    if (initialScript) {
+        try {
+            initialData = JSON.parse(initialScript.textContent);
+            // console.log('[DEBUG] birthboard页面获取到预填数据:', initialData);
+        } catch (e) { /* console.log('[DEBUG] birthboard页面预填数据解析失败', e); */ }
+    }
+    if (initialData) {
+        if (initialData.receiver) {
+            $('#receiver').val(initialData.receiver).trigger('change');
+        }
+        if (initialData.senders) {
+            $('#senders').val(initialData.senders).trigger('change');
+        }
+        if (initialData.date) {
+            $('#date').val(initialData.date);
+        }
+        if (typeof initialData.mode !== 'undefined') {
+            $('#mode').val(initialData.mode.toString());
+        }
+        if (typeof initialData.is_anonymous !== 'undefined') {
+            $('#is_anonymous').prop('checked', initialData.is_anonymous);
+        }
+    }
+    // 纯JS自定义弹窗逻辑，合并校验和弹窗拦截
+    let pendingSubmit = false;
+    // $('#birthboard-form').on('submit', function(e){
+        
+    // });
+    $('#modal-cancel-btn').on('click', function(){
+        $('#confirmChargeModal').hide();
+        // console.log('点击取消，弹窗关闭');
+    });
+    $('#modal-confirm-charge-btn').on('click', function(){
+        pendingSubmit = true;
+        $('#confirmChargeModal').hide();
+        // console.log('点击确认扣款，pendingSubmit设为true，重新触发submit');
+        // $('#birthboard-form').trigger('submit');
+        $('#birthboard-form')[0].submit();
+    });
+    function showInsufficientBalanceModal(balance) {
+        $('#insufficient-balance-text').text('当前余额为' + balance + '，余额不足。');
+        $('#insufficientBalanceModal').show();
+    }
+    $('#insufficient-balance-confirm-btn').on('click', function(){
+        $('#insufficientBalanceModal').hide();
+    });
+    $('#insufficientBalanceModal').on('click', function(e){
+        if (e.target === this) {
+            $('#insufficientBalanceModal').hide();
+        }
+    });
+    const insufficientBalanceScript = document.getElementById('insufficient-balance-data');
+    if (insufficientBalanceScript) {
+        try {
+            const serverInsufficientBalance = JSON.parse(insufficientBalanceScript.textContent);
+            if (serverInsufficientBalance !== null && serverInsufficientBalance !== '') {
+                showInsufficientBalanceModal(serverInsufficientBalance);
+            }
+        } catch (e) {
+            // console.log('[DEBUG] insufficient-balance-data parse failed', e);
+        }
+    }
+    const todayReminderScript = document.getElementById('today-entry-reminders-data');
+    const todayReminders = todayReminderScript ? JSON.parse(todayReminderScript.textContent) : {};
+    const dateRuleScript = document.getElementById('birthboard-date-rule-data');
+    const dateRule = dateRuleScript ? JSON.parse(dateRuleScript.textContent) : {};
+    const reminderUserId = "{{ request.user.username }}";
+    const reminderDate = todayReminders.today || '';
+    const reminderStoragePrefix = 'birthboard_today_reminder:' + reminderUserId + ':' + reminderDate + ':';
+    const reminderQueue = [];
+    let happyDismissed = false;
+    let blessDismissed = false;
+    try {
+        happyDismissed = localStorage.getItem(reminderStoragePrefix + 'happy') === '1';
+        blessDismissed = localStorage.getItem(reminderStoragePrefix + 'bless') === '1';
+    } catch (e) {
+        // console.log('[DEBUG] localStorage unavailable for reminder state', e);
+    }
+    const receiverNames = Array.isArray(todayReminders.receiver_names) ? todayReminders.receiver_names.filter(Boolean) : [];
+    const senderNames = Array.isArray(todayReminders.sender_names) ? todayReminders.sender_names.filter(Boolean) : [];
+    if (receiverNames.length > 0 && !happyDismissed) {
+        reminderQueue.push('happy');
+    }
+    if (senderNames.length > 0 && !blessDismissed) {
+        reminderQueue.push('bless');
+    }
+    let currentReminderType = null;
+
+    function showNextTodayReminder() {
+        if (reminderQueue.length === 0) {
+            currentReminderType = null;
+            return;
+        }
+        const nextType = reminderQueue.shift();
+        currentReminderType = nextType;
+        if (nextType === 'happy') {
+            $('#today-reminder-text').text('生日快乐！今天是你的生日投放日，祝你今天开心顺利！');
+        } else {
+            $('#today-reminder-text').text('今天有你参与的生日投放，请记得送上祝福：' + senderNames.join('、') + ' 生日快乐！');
+        }
+        $('#todayReminderModal').show();
+    }
+
+    $('#today-reminder-confirm-btn').on('click', function() {
+        $('#todayReminderModal').hide();
+        if (currentReminderType) {
+            try {
+                localStorage.setItem(reminderStoragePrefix + currentReminderType, '1');
+            } catch (e) {
+                // console.log('[DEBUG] localStorage write failed for reminder state', e);
+            }
+        }
+        showNextTodayReminder();
+    });
+    showNextTodayReminder();
+    if (dateRule.min_date) {
+        $('#date').attr('min', dateRule.min_date);
+    }
+    if (dateRule.max_date) {
+        $('#date').attr('max', dateRule.max_date);
+    }
+        // 创建隐藏input用于提交receiver（如select2被禁用时）
+        if ($('#real-receiver').length === 0) {
+            $('<input type="hidden" id="real-receiver" name="receiver" />').appendTo('#birthboard-form');
+        }
+    const CONTEXT = JSON.parse(document.getElementById('context-data').textContent);
+    // 当前用户 id
+    const currentUserId = "{{ request.user.username }}";
+    // 当前用户姓名
+    const currentUserName = "{{ request.user.get_full_name|default:request.user.username }}";
+    // 用户列表
+    const userInfos = CONTEXT.user_infos;
+    // console.log(currentUserId);
+    // console.log(currentUserName);
+    // 初始化被祝福用户下拉框（排除自己）
+
+    function initReceiverSelect() {
+        let filtered = userInfos.filter(u => String(u.id) !== currentUserId);
+        $('#receiver').removeAttr('required'); // 禁用select2自带校验
+        $('#receiver').empty().select2({
+            theme: "classic",
+            placeholder: "请选择被祝福用户",
+            allowClear: true,
+            data: filtered,
+            matcher: matchUser,
+            multiple: false
+        });
+        $('#receiver').val(null).trigger('change');
+    }
+
+    // 刷新送出祝福人多选框（排除自己和被祝福用户）
+    function refreshSendersSelect() {
+        let receiverId = $('#receiver').val();
+        let filtered = userInfos.filter(u => String(u.id) !== currentUserId && String(u.id) !== String(receiverId));
+        $('#senders').removeAttr('required'); // 禁用select2自带校验
+        $('#senders').empty().select2({
+            theme: "classic",
+            placeholder: "请选择送出祝福的用户（可多选，默认只有自己）",
+            allowClear: true,
+            data: filtered,
+            matcher: matchUser,
+            multiple: true
+        });
+        // 默认无选中项
+        $('#senders').val([]).trigger('change.select2');
+        updateSelectedSenders();
+        updateCost();
+        $('#senders').prop('disabled', false);
+    }
+
+    // “已选择”一行逻辑：始终显示自己（姓名+（我）），多选框选中的用户也显示
+    function updateSelectedSenders() {
+        let selectedIds = ($('#senders').val() || []).map(String);
+        let names = [];
+        names.push(currentUserName + '（我）');
+        for (let i = 0; i < selectedIds.length; ++i) {
+            let user = userInfos.find(u => String(u.id) === selectedIds[i]);
+            if (user) names.push(user.text);
+        }
+        $('#selected-senders-list').text(names.join('，'));
+    }
+
+    // 价格平分逻辑
+    function updateCost() {
+        let selected = ($('#senders').val() || []).map(String);
+        let mode = parseInt($('#mode').val());
+        let total = modeCost[isNaN(mode) ? 0 : mode];
+        let count = 1 + selected.length;
+        if (selected.length === 0) {
+            $('#cost-per-user').text('全部由自己承担（' + total + '元气值）');
+        } else {
+            let per = Math.floor(total / count);
+            $('#cost-per-user').text('均分，每人' + per + '元气值');
+        }
+    }
+
+    // 初始化（带预填）
+    if (initialData) {
+        // 先初始化receiver并选中
+        let receiverId = initialData.receiver || null;
+        initReceiverSelect();
+        if (receiverId) {
+            $('#receiver').val(receiverId).trigger('change');
+        }
+        // 再刷新senders并选中
+        setTimeout(function() {
+            refreshSendersSelect();
+            if (initialData.senders && initialData.senders.length > 0) {
+                $('#senders').val(initialData.senders.map(String)).trigger('change.select2');
+            }
+        }, 0);
+        // 其他字段
+        if (initialData.date) {
+            $('#date').val(initialData.date);
+        }
+        if (typeof initialData.mode !== 'undefined') {
+            $('#mode').val(initialData.mode.toString());
+        }
+        if (typeof initialData.is_anonymous !== 'undefined') {
+            $('#is_anonymous').prop('checked', initialData.is_anonymous);
+        }
+    } else {
+        initReceiverSelect();
+        refreshSendersSelect();
+    }
+
+    // 监听被祝福用户变化，刷新送出用户选择框
+    $('#receiver').on('change', function(){
+        refreshSendersSelect();
+    });
+    // 监听送出用户变化
+    $('#senders').on('change', function(){
+        updateCost();
+        updateSelectedSenders();
+    });
+    // 监听模式变化
+    $('#mode').on('change', updateCost);
+
+    // 初始化“已选择”与费用
+    updateSelectedSenders();
+    updateCost();
+
+    function checkCurrentUserBalance(senderUsernamesForCheck, mode, senderCountForCheck) {
+        return $.ajax({
+            url: '/birthboard/api/check_yqpoint/',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                senders: senderUsernamesForCheck,
+                mode: mode,
+                sender_count: senderCountForCheck
+            })
+        }).then(function(resp) {
+            // console.log('【DEBUG】余额校验AJAX返回:', resp);
+            if (resp.ok) {
+                let insufficient = [];
+                // console.log('元气值余额校验:');
+                for (let uid in resp.result) {
+                    let info = resp.result[uid];
+                    // console.log(`用户: ${uid}，余额: ${info.balance}，所需: ${info.need}，足够: ${info.enough}`);
+                    if (!info.enough) insufficient.push(uid);
+                }
+                $('#senders option').css('color', '');
+                if (insufficient.length > 0) {
+                    const currentInfo = resp.result[currentUserId] || {balance: 0};
+                    showInsufficientBalanceModal(currentInfo.balance);
+                    return false;
+                }
+                return true;
+            }
+            showInsufficientBalanceModal(0);
+            return false;
+        }).catch(function() {
+            // console.log('【DEBUG】余额校验AJAX异常');
+            showInsufficientBalanceModal(0);
+            return false;
+        });
+    }
+
+    // 表单提交时自定义校验
+    $('#birthboard-form').on('submit', async function(e){
+        e.preventDefault();
+        // 调试：打印实际提交内容
+        // console.log('【DEBUG】receiver(username):', $('#receiver').val());
+        // console.log('【DEBUG】senders(username):', $('#senders').val());
+        // --- 提交前将username转为pk，仅提交内容变更 ---
+        // receiver
+        let receiverUsername = $('#receiver').val();
+        let receiverObj = userInfos.find(u => u.id === receiverUsername);
+        let receiverPk = receiverObj ? receiverObj.pk : '';
+        $('#real-receiver').val(receiverPk);
+        // senders
+        let senderUsernames = ($('#senders').val() || []);
+        if (!senderUsernames.includes(currentUserId)) senderUsernames.unshift(currentUserId);
+        // console.log('【DEBUG】senderUsernames(含自己):', senderUsernames);
+        // 直接用pk数组
+        let senderPks = senderUsernames.map(un => {
+            let u = userInfos.find(x => x.id === un);
+            return u ? u.pk : null;
+        }).filter(x => x !== null);
+        // console.log('【DEBUG】senderPks(含自己):', senderPks);
+        // 先移除所有旧的隐藏input
+        $("input[name='senders'][type='hidden']").remove();
+        // 动态添加每个pk为一个input
+        senderPks.forEach(pk => {
+            $('<input type="hidden" name="senders" value="'+pk+'" />').appendTo('#birthboard-form');
+        });
+        // select2控件的选中值也同步为pk
+        $('#senders').val(senderPks.map(String));
+        // 打印所有隐藏input
+        let debugInputs = [];
+        $("input[name='senders'][type='hidden']").each(function(){ debugInputs.push($(this).val()); });
+        // console.log('【DEBUG】所有隐藏input[name=senders] value:', debugInputs);
+        // 余额校验仅检查本人，不检查受邀者
+        let senderUsernamesForCheck = [currentUserId];
+        let hasError = false;
+        let firstErrorTop = null;
+        // 清除旧的错误样式和提示
+        $('#receiver').removeClass('is-invalid');
+        $('#receiver-error').hide().text('');
+        $('#senders').removeClass('is-invalid');
+        $('#senders-error').hide().text('');
+        $('#image').removeClass('is-invalid');
+        $('#image-error').hide().text('');
+        $('#date').removeClass('is-invalid');
+        $('#date-error').hide().text('');
+
+        // 1. 检查被祝福用户
+        let receiver = $('#receiver').val();
+        if (!receiver) {
+            $('#receiver').addClass('is-invalid');
+            $('#receiver-error').show().text('没有输入');
+            hasError = true;
+            firstErrorTop = $('#receiver-group').offset().top;
+        }
+
+        // 2. 检查送出用户余额（后端实时查询）
+        // 余额校验时用 senderUsernamesForCheck（username列表），不要用select2控件的值
+        let mode = parseInt($('#mode').val());
+        let senderCountForCheck = senderUsernames.length;
+        // console.log('【DEBUG】余额校验AJAX参数 senders:', senderUsernamesForCheck, 'mode:', mode);
+        const balanceOk = await checkCurrentUserBalance(senderUsernamesForCheck, mode, senderCountForCheck);
+        if (!balanceOk) {
+            return false;
+        }
+
+        // 3. 检查图片（未上传属于同步错误，尺寸异步）
+        let imageInput = $('#image')[0];
+        let imageFile = imageInput.files[0];
+        let imageNeedCheckSize = false;
+        if (!imageFile) {
+            $('#image').addClass('is-invalid');
+            $('#image-error').show().text('没有上传图片');
+            hasError = true;
+            if (!firstErrorTop) firstErrorTop = $('#image-group').offset().top;
+        } else {
+            imageNeedCheckSize = true;
+        }
+
+        // 4. 检查日期
+        let dateInput = $('#date');
+        let dateVal = dateInput.val();
+        let dateOk = true;
+        if (!dateVal) {
+            dateInput.addClass('is-invalid');
+            if (dateInput.next('.invalid-feedback').length === 0) {
+                $('<div class="invalid-feedback text-danger" id="date-error" style="display:block;">日期没写</div>').insertAfter(dateInput);
+            } else {
+                $('#date-error').show().text('日期没写');
+            }
+            hasError = true;
+            if (!firstErrorTop) firstErrorTop = dateInput.closest('.form-group, .form-row').offset().top;
+            dateOk = false;
+        } else {
+            let inputDate = new Date(dateVal);
+            inputDate.setHours(0,0,0,0);
+            let invalidByRule = false;
+            if (isNaN(inputDate.getTime())) {
+                invalidByRule = true;
+            } else {
+                let y = inputDate.getFullYear();
+                let m = String(inputDate.getMonth() + 1).padStart(2, '0');
+                let d = String(inputDate.getDate()).padStart(2, '0');
+                let selectedISO = y + '-' + m + '-' + d;
+                invalidByRule = selectedISO < dateRule.min_date || selectedISO > dateRule.max_date;
+            }
+            if (invalidByRule) {
+                dateInput.addClass('is-invalid');
+                if (dateInput.next('.invalid-feedback').length === 0) {
+                    $('<div class="invalid-feedback text-danger" id="date-error" style="display:block;"></div>').insertAfter(dateInput);
+                    $('#date-error').show().text(dateRule.message || '日期不在允许范围内');
+                } else {
+                    $('#date-error').show().text(dateRule.message || '日期不在允许范围内');
+                }
+                hasError = true;
+                if (!firstErrorTop) firstErrorTop = dateInput.closest('.form-group, .form-row').offset().top;
+                dateOk = false;
+            } else {
+                $('#date-error').hide();
+            }
+        }
+
+        // 滚动到第一个错误
+        if (firstErrorTop) {
+            $('html, body').animate({scrollTop: firstErrorTop - 100}, 300);
+        }
+
+        // 如果有同步错误，阻止提交，所有错误会同时显示
+        if (hasError || !dateOk) {
+            return false;
+        }
+
+        // 所有同步校验通过后，异步校验图片尺寸
+        if (imageNeedCheckSize) {
+            let img = new Image();
+            let objectUrl = URL.createObjectURL(imageFile);
+            img.onload = function() {
+                if (img.width !== 1920 || img.height !== 1080) {
+                    $('#image').addClass('is-invalid');
+                    $('#image-error').show().text('图片不符合要求');
+                    $('html, body').animate({scrollTop: $('#image-group').offset().top - 100}, 300);
+                } else {
+                    $('#image-error').hide();
+                    // 所有校验通过，提交
+                    $('#confirmChargeModal').show();
+                    // console.log('弹窗已显示，阻止默认提交');
+                    // $('#birthboard-form')[0].submit();
+                }
+                URL.revokeObjectURL(objectUrl);
+            };
+            img.onerror = function() {
+                $('#image').addClass('is-invalid');
+                $('#image-error').show().text('图片加载失败');
+                $('html, body').animate({scrollTop: $('#image-group').offset().top - 100}, 300);
+                URL.revokeObjectURL(objectUrl);
+            };
+            img.src = objectUrl;
+            return false;
+        }
+        // 没有图片需要异步校验，直接提交
+        // console.log('表单submit事件触发，pendingSubmit=', pendingSubmit);
+        if (!pendingSubmit) {
+            $('#confirmChargeModal').show();
+            // console.log('弹窗已显示，阻止默认提交');
+            return false;
+        }
+        pendingSubmit = false; // 重置
+        // console.log('通过pendingSubmit，继续校验和提交');
+        // 继续执行后续校验和提交逻辑（原有校验代码在这里）
+        // ...（原有校验代码无需变动）...
+
+        // 禁用receiver select，防止提交错误
+        $('#receiver').prop('disabled', true);
+        // 禁用senders select，防止重复提交
+        $('#senders').prop('disabled', true);
+        this.submit();
+    });
+});
+</script>
+
