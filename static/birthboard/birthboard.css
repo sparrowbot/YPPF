@@ -79,7 +79,7 @@ html {
             --pos-submit-left: 191px;
             --pos-mode-top: 3240px;
             --pos-mode-left: 200px;
-            --pos-mode-dropdown: 20px;
+            --pos-mode-dropdown: 10px;
             --pos-dropdown-width: 500px;
             --pos-dropdown-height: 250px;
         }
@@ -107,6 +107,8 @@ html {
         }
         .select2-container--my-custom-theme .select2-selection--single {
             border: none;
+            /* 覆盖 select2 基线的 height: 28px，让高度随内容（行高）增长 */
+            height: auto;
             min-height: 60px;
             min-width: 400px;
             cursor: pointer;
@@ -115,7 +117,8 @@ html {
         }
         .select2-container--my-custom-theme .select2-selection--single .select2-selection__rendered {
             color: var(--bs-color);
-            line-height: 60px;
+            /* 按字号缩放行高，避免 phone 大字号下字形溢出顶部被裁切 */
+            line-height: 1.24;
             padding: 0;
         }
         .select2-container--my-custom-theme .select2-selection--single .select2-selection__arrow {
@@ -539,6 +542,7 @@ html {
         }
         #mode-group .select2-dropdown {
             margin-top: var(--pos-mode-dropdown);
+            margin-left: -10px;
         }
         #cost-per-user{
             color: var(--bs-color);
