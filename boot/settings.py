@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     "dormitory",
     "feedback",
     "achievement",
+    "birthboard",
 ]
 
 
