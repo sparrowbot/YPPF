@@ -1,0 +1,63 @@
+html, body {
+            margin: 0;
+            background: #181818;
+            color: #ffffff;
+            font-family: "Microsoft YaHei", "Arial", sans-serif;
+        }
+        .contract-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 60px 40px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 40px;
+            letter-spacing: 4px;
+        }
+        .contract-content {
+            background: #222;
+            padding: 32px;
+            border-radius: 8px;
+            line-height: 2;
+            font-size: 15px;
+            color: #ccc;
+            margin-bottom: 40px;
+        }
+        .contract-content p {
+            margin: 0 0 16px 0;
+        }
+        .contract-content h3 {
+            color: #fff;
+            margin-top: 24px;
+            margin-bottom: 12px;
+        }
+        .btn-row {
+            text-align: center;
+        }
+        #sign-btn {
+            display: inline-block;
+            padding: 14px 60px;
+            font-size: 18px;
+            color: #fff;
+            background: #c0392b;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            letter-spacing: 3px;
+            transition: background 0.2s;
+        }
+        #sign-btn:hover {
+            background: #e74c3c;
+        }
+        #sign-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .signed-hint {
+            text-align: center;
+            color: #27ae60;
+            font-size: 16px;
+            margin-top: 20px;
+            display: none;
+        }
