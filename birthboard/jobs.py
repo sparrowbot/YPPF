@@ -171,7 +171,7 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord):
         record.id,
         record.status,
     )
-    notify_auto_reject_refund(record, paid_users)
+    transaction.on_commit(lambda: notify_auto_reject_refund(record, paid_users))
 
 
 @periodical(
@@ -379,7 +379,7 @@ def birthboard_nightly_update_2345():
                     after_status=rec.status,
                     detail={"scope": "nightly_start", "date": str(target_date)},
                 )
-                notify_broadcast_started(rec)
+                transaction.on_commit(lambda rec=rec: notify_broadcast_started(rec))
                 img_path = _get_abs_image_path(rec.image)
                 if img_path:
                     to_start.append(img_path)
@@ -406,12 +406,12 @@ def birthboard_nightly_update_2345():
                         after_status=rec.status,
                         detail={"scope": "nightly_finish", "date": str(target_date), "duration_days": dur},
                     )
-                    notify_broadcast_ended(rec, end_date)
+                    transaction.on_commit(lambda rec=rec, end_date=end_date: notify_broadcast_ended(rec, end_date))
                     img_path = _get_abs_image_path(rec.image)
                     if img_path:
                         to_stop.append(img_path)
                 elif dur > 1 and end_date - timedelta(days=1) == target_date:
-                    notify_broadcast_ending_soon(rec, end_date)
+                    transaction.on_commit(lambda rec=rec, end_date=end_date: notify_broadcast_ending_soon(rec, end_date))
 
         # After commits, call update_list for each path (do not roll back on update_list failure)
         try:

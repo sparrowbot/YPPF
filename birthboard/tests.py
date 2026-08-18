@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.core.management import call_command
 from django.urls import reverse
 
+import os
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -132,8 +133,15 @@ class BirthboardNightlyJobsTests(TestCase):
 		self.img1 = SimpleUploadedFile("test1.jpg", b"fake-image-1", content_type="image/jpeg")
 		self.img2 = SimpleUploadedFile("test2.jpg", b"fake-image-2", content_type="image/jpeg")
 
-	@patch("birthboard.jobs.update_list")
-	def test_nightly_update_2345_transitions_and_calls_update_list(self, mock_update):
+	@patch("playwright.sync_api.sync_playwright")
+	@patch("birthboard.web_controller._run_update_cycle")
+	@patch("birthboard.web_controller.open_and_login")
+	def test_nightly_update_2345_transitions_and_calls_update_cycle(
+		self, mock_open, mock_update, mock_playwright,
+	):
+		mock_open.return_value = (object(), object())
+		mock_update.return_value = (object(), object(), {})
+
 		now = timezone.now()
 		today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
 		target_date = today + timedelta(days=1)
@@ -164,9 +172,10 @@ class BirthboardNightlyJobsTests(TestCase):
 		self.assertEqual(rec_start.status, BirthboardRecord.Status.ONGOING)
 		self.assertEqual(rec_finish.status, BirthboardRecord.Status.FINISHED)
 
-		called_paths = {call.args[0] for call in mock_update.call_args_list}
-		self.assertIn(rec_start.image.path, called_paths)
-		self.assertIn(rec_finish.image.path, called_paths)
+		self.assertEqual(mock_update.call_count, 1)
+		kwargs = mock_update.call_args.kwargs
+		self.assertIn(os.path.abspath(rec_start.image.path), kwargs["up_image_name"])
+		self.assertIn(os.path.abspath(rec_finish.image.path), kwargs["del_image_name"])
 
 
 class BirthboardLockCoordinationTests(TestCase):
@@ -199,8 +208,10 @@ class LockUiIntegrationTests(TestCase):
 	def setUp(self):
 		self.user = User.objects.create_user(username="tester", name="Tester", password="test")
 		self.approver = User.objects.create_user(username="approver", name="Approver", password="test")
-		from birthboard.models import BirthboardApprover
+		from birthboard.models import BirthboardApprover, BirthboardContract
 		BirthboardApprover.objects.create(user=self.approver, is_active=True)
+		BirthboardContract.objects.create(user=self.user, signed=True)
+		BirthboardContract.objects.create(user=self.approver, signed=True)
 
 	def test_confirm_page_shows_disabled_revoke_when_locked(self):
 		self.client.login(username="tester", password="test")
@@ -218,7 +229,10 @@ class LockUiIntegrationTests(TestCase):
 		from django.core.cache import cache
 		cache.set("birthboard:update_in_progress", True, timeout=300)
 
-		resp = self.client.get(reverse('birthboard_confirm') + '?tab=received')
+		resp = self.client.get(
+			reverse('birthboard_confirm') + '?tab=received',
+			HTTP_REFERER='/birthboard/',
+		)
 		content = resp.content.decode('utf-8')
 		self.assertIn('23点45-24点系统同步中，无法操作', content)
 		self.assertIn('disabled', content)
@@ -236,7 +250,7 @@ class LockUiIntegrationTests(TestCase):
 			mode=0,
 			per_cost=1,
 			image=img1,
-			status=BirthboardRecord.Status.READY,
+			status=BirthboardRecord.Status.WAITING_APPROVE,
 		)
 		BirthboardRecord.objects.filter(pk=rec1.pk).update(created_at=timezone.now() - timedelta(minutes=5))
 		rec2 = BirthboardRecord.objects.create(
@@ -246,13 +260,16 @@ class LockUiIntegrationTests(TestCase):
 			mode=0,
 			per_cost=1,
 			image=img2,
-			status=BirthboardRecord.Status.READY,
+			status=BirthboardRecord.Status.WAITING_APPROVE,
 		)
 		resp = self.client.get(reverse('birthboard_approve'))
 		content = resp.content.decode('utf-8')
 		self.assertIn('someone2', content)
-		self.assertNotIn('someone1', content)
 		self.assertIn('初审通过', content)
+		# 待审核卡片按创建时间倒序，只挑最新一条作为当前审核对象
+		current = resp.context['current_activity']
+		self.assertIsNotNone(current)
+		self.assertEqual(current['record'].pk, rec2.pk)
 
 	def test_approve_page_shows_empty_state_when_no_pending(self):
 		self.client.login(username="approver", password="test")
@@ -262,16 +279,7 @@ class LockUiIntegrationTests(TestCase):
 
 
 class BirthboardNightlySimulationCommandTests(TestCase):
-	@patch("birthboard.management.commands.simulate_birthboard_nightly_update.birthboard_nightly_update_2345")
-	@patch("birthboard.management.commands.simulate_birthboard_nightly_update.birthboard_nightly_update_0005")
-	def test_simulation_command_runs_both_jobs(self, mock_0005, mock_2345):
-		call_command("simulate_birthboard_nightly_update", "--job=both")
+	@patch("birthboard.jobs.birthboard_nightly_update_2345")
+	def test_simulation_command_runs_job(self, mock_2345):
+		call_command("simulate_birthboard_nightly_update")
 		mock_2345.assert_called_once()
-		mock_0005.assert_called_once()
-
-	@patch("birthboard.management.commands.simulate_birthboard_nightly_update.birthboard_nightly_update_2345")
-	@patch("birthboard.management.commands.simulate_birthboard_nightly_update.birthboard_nightly_update_0005")
-	def test_simulation_command_runs_single_job(self, mock_0005, mock_2345):
-		call_command("simulate_birthboard_nightly_update", "--job=2345")
-		mock_2345.assert_called_once()
-		mock_0005.assert_not_called()

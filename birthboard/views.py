@@ -87,7 +87,6 @@ def _handle_revoke(revoke_id: str, actor=None) -> None:
             record.status = record.Status.CANCELED
             record.save(update_fields=["status"])
             _log_record_change(record, actor=actor, action=ChangeRecord.Action.REVOKE, before_status=before_status, after_status=record.status, detail={"revoke_id": revoke_id})
-            notify_revoke(record)
             # 如果原状态为 ONGOING，调用外部的 update_list(image_path)
             try:
                 if before_status == BirthboardRecord.Status.ONGOING:
@@ -130,6 +129,7 @@ def _handle_revoke(revoke_id: str, actor=None) -> None:
             except Exception:
                 # 忽略任何与补充逻辑相关的异常，确保撤销流程不被中断
                 pass
+        notify_revoke(record)
     except BirthboardRecord.DoesNotExist:
         pass
 
@@ -320,7 +320,7 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord, actor=None
     record.status = record.Status.TERMINATED
     record.save(update_fields=["status"])
     _log_record_change(record, actor=actor, action=action, before_status=before_status, after_status=record.status, detail=detail or {"refunded_participants": [p.user_id for p in paid_parts]})
-    notify_refund(record, paid_users)
+    transaction.on_commit(lambda: notify_refund(record, paid_users))
 
 
 def _get_today_entry_reminders(user):
@@ -568,10 +568,10 @@ def birthboard(request):
                         status=BirthboardParticipant.Status.WAIT,
                     )
                     initiator_name = request.user.get_full_name() or request.user.username
-                    for sender in senders:
-                        if sender == request.user:
-                            continue
-                        notify_invite_sender(record, sender, initiator_name, per)
+                    invited_senders = [
+                        sender for sender in senders
+                        if sender != request.user
+                    ]
                     _log_record_change(
                         record,
                         actor=request.user,
@@ -585,6 +585,8 @@ def birthboard(request):
                             'per_cost': per,
                         },
                     )
+                for sender in invited_senders:
+                    notify_invite_sender(record, sender, initiator_name, per)
             except Exception as e:
                 messages.error(request, f"记录创建失败：{e}")
                 return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
