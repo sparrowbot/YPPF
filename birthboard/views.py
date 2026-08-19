@@ -49,6 +49,11 @@ from birthboard.notify import (
     notify_receiver_confirmed,
     notify_payment_success,
 )
+from birthboard.reminder import (
+    cancel_approval_reminders,
+    schedule_first_approval_reminders,
+    schedule_second_approval_reminders,
+)
 from playwright.sync_api import sync_playwright
 
 from boot.config import shihannet
@@ -87,6 +92,7 @@ def _handle_revoke(revoke_id: str, actor=None) -> None:
             record.status = record.Status.CANCELED
             record.save(update_fields=["status"])
             _log_record_change(record, actor=actor, action=ChangeRecord.Action.REVOKE, before_status=before_status, after_status=record.status, detail={"revoke_id": revoke_id})
+            transaction.on_commit(lambda: cancel_approval_reminders(record))
             # 如果原状态为 ONGOING，调用外部的 update_list(image_path)
             try:
                 if before_status == BirthboardRecord.Status.ONGOING:
@@ -897,6 +903,7 @@ def birthboard_confirm(request):
                         if all_senders_paid:
                             record.status = record.Status.WAITING_APPROVE
                             record.save(update_fields=["status"])
+                            schedule_first_approval_reminders(record)
                         _log_record_change(
                             record,
                             actor=request.user,
@@ -1209,6 +1216,8 @@ def birthboard_approve(request):
                             record.first_approver = request.user
                             record.first_approved_at = datetime.now()
                             record.save(update_fields=["first_approved", "first_approver", "first_approved_at"])
+                            cancel_approval_reminders(record, stage='first')
+                            schedule_second_approval_reminders(record)
                             _log_record_change(
                                 record,
                                 actor=request.user,
@@ -1225,6 +1234,7 @@ def birthboard_approve(request):
                             reasons = request.POST.getlist("reasons")
                             detail = request.POST.get("detail", "")
                             _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                            cancel_approval_reminders(record, stage='first')
                             message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
                 # 二审操作
                 elif is_second and record.first_approved:
@@ -1234,18 +1244,19 @@ def birthboard_approve(request):
                         else:
                             before_status = record.status
                             record.status = BirthboardRecord.Status.READY
-                        record.second_approver = request.user
-                        record.second_approved_at = datetime.now()
-                        record.save(update_fields=["status", "second_approver", "second_approved_at"])
-                        _log_record_change(
-                            record,
-                            actor=request.user,
-                            action=ChangeRecord.Action.APPROVE,
-                            before_status=before_status,
-                            after_status=record.status,
-                            detail={'stage': 'second'},
-                        )
-                        message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过终审。"
+                            record.second_approver = request.user
+                            record.second_approved_at = datetime.now()
+                            record.save(update_fields=["status", "second_approver", "second_approved_at"])
+                            cancel_approval_reminders(record, stage='second')
+                            _log_record_change(
+                                record,
+                                actor=request.user,
+                                action=ChangeRecord.Action.APPROVE,
+                                before_status=before_status,
+                                after_status=record.status,
+                                detail={'stage': 'second'},
+                            )
+                            message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过终审。"
                     elif action == "reject":
                         if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
                             message = "该活动已被其他管理员终审，无需操作。"
@@ -1253,6 +1264,7 @@ def birthboard_approve(request):
                             reasons = request.POST.getlist("reasons")
                             detail = request.POST.get("detail", "")
                             _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                            cancel_approval_reminders(record, stage='second')
                             message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
             elif action == "reject":
                 # READY/ONGOING 等非待审核状态的驳回

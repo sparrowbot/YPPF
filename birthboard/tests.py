@@ -7,12 +7,19 @@ from django.core.management import call_command
 from django.urls import reverse
 
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from birthboard.models import BirthboardRecord, BirthboardParticipant, BirthboardRejectedIssue, ChangeRecord
 from birthboard.utils import calculate_per_cost
 from birthboard.views import _deduct_and_mark_paid, _reject_record_by_admin, _refund_paid_participants_and_terminate
+from birthboard.reminder import (
+    _first_reminder_times,
+    _second_reminder_times,
+    _send_approval_reminder,
+    schedule_first_approval_reminders,
+    cancel_approval_reminders,
+)
 from birthboard import jobs as bb_jobs
 from birthboard import views as bb_views
 from generic.models import YQPointRecord
@@ -283,3 +290,104 @@ class BirthboardNightlySimulationCommandTests(TestCase):
 	def test_simulation_command_runs_job(self, mock_2345):
 		call_command("simulate_birthboard_nightly_update")
 		mock_2345.assert_called_once()
+
+
+class BirthboardApprovalReminderTests(TestCase):
+	"""审核提醒的排期时间与调度测试。"""
+
+	def _make_record(self, date="2026-08-19"):
+		image = SimpleUploadedFile("test.jpg", b"fake-image", content_type="image/jpeg")
+		return BirthboardRecord.objects.create(
+			receiver_username="receiver",
+			receiver_name="receiver",
+			date=datetime.strptime(date, "%Y-%m-%d").date(),
+			mode=0,
+			per_cost=10,
+			image=image,
+			status=BirthboardRecord.Status.WAITING_APPROVE,
+		)
+
+	# ---- 时间计算 ----
+
+	def test_first_reminder_times_full(self):
+		record = self._make_record("2026-08-19")
+		now = datetime(2026, 8, 10, 0, 0)
+		times = _first_reminder_times(record, now)
+		# D-5/D-4 每天 9:00、14:00 共 4 个；D-3~D-1 每天 9:00~23:00 共 45 个
+		self.assertEqual(len(times), 49)
+		self.assertIn(datetime(2026, 8, 14, 9, 0), times)
+		self.assertIn(datetime(2026, 8, 15, 14, 0), times)
+		self.assertIn(datetime(2026, 8, 18, 23, 0), times)
+
+	def test_first_reminder_times_filters_past(self):
+		record = self._make_record("2026-08-19")
+		now = datetime(2026, 8, 18, 12, 0)
+		times = _first_reminder_times(record, now)
+		self.assertEqual(len(times), 11)  # 只剩 D-1 13:00~23:00
+		self.assertTrue(all(t > now for t in times))
+
+	def test_second_reminder_times_full(self):
+		record = self._make_record("2026-08-19")
+		now = datetime(2026, 8, 15, 0, 0)  # 早于 D-2
+		times = _second_reminder_times(record, now)
+		# D-2 9:00、14:00 + D-1 9:00~23:00 共 15 个 = 17 个
+		self.assertEqual(len(times), 17)
+		self.assertIn(datetime(2026, 8, 17, 9, 0), times)
+		self.assertIn(datetime(2026, 8, 17, 14, 0), times)
+		self.assertIn(datetime(2026, 8, 18, 23, 0), times)
+
+	def test_second_reminder_times_skips_past_when_late(self):
+		record = self._make_record("2026-08-19")
+		now = datetime(2026, 8, 17, 10, 0)  # D-2 当天进入二审
+		times = _second_reminder_times(record, now)
+		# 跳过 D-2 9:00，保留 D-2 14:00 + D-1 15 个 = 16 个
+		self.assertNotIn(datetime(2026, 8, 17, 9, 0), times)
+		self.assertIn(datetime(2026, 8, 17, 14, 0), times)
+		self.assertEqual(len(times), 16)
+
+	# ---- 发送幂等 ----
+
+	@patch("birthboard.notify.notify_approval_reminder")
+	def test_send_approval_reminder_skips_when_not_pending(self, mock_notify):
+		record = self._make_record("2026-08-19")
+		record.status = BirthboardRecord.Status.READY
+		record.save(update_fields=["status"])
+		_send_approval_reminder(record.id, "first")
+		mock_notify.assert_not_called()
+
+	@patch("birthboard.notify.notify_approval_reminder")
+	def test_send_approval_reminder_skips_when_first_already_done(self, mock_notify):
+		record = self._make_record("2026-08-19")
+		record.first_approved = True
+		record.save(update_fields=["first_approved"])
+		_send_approval_reminder(record.id, "first")
+		mock_notify.assert_not_called()
+
+	@patch("birthboard.notify.notify_approval_reminder")
+	def test_send_approval_reminder_calls_notify_when_pending(self, mock_notify):
+		record = self._make_record("2026-08-19")
+		_send_approval_reminder(record.id, "first")
+		mock_notify.assert_called_once()
+		args, _ = mock_notify.call_args
+		self.assertEqual(args[0].id, record.id)
+		self.assertEqual(args[1], "first")
+
+	# ---- 调度/撤回 ----
+
+	@patch("birthboard.reminder.ScheduleAdder")
+	@patch("birthboard.reminder._first_reminder_times", return_value=[datetime(2026, 8, 14, 9, 0)])
+	def test_schedule_first_approval_reminders(self, mock_times, mock_adder):
+		record = self._make_record("2026-08-19")
+		schedule_first_approval_reminders(record)
+		mock_adder.assert_called_once()
+		_, kwargs = mock_adder.call_args
+		self.assertEqual(kwargs["run_time"], datetime(2026, 8, 14, 9, 0))
+		self.assertEqual(kwargs["id"], f"birthboard_approve_remind_{record.id}_first_202608140900")
+
+	@patch("birthboard.reminder.remove_job")
+	def test_cancel_approval_reminders(self, mock_remove):
+		record = self._make_record("2026-08-19")
+		job = type("Job", (), {"id": f"birthboard_approve_remind_{record.id}_first_202608140900"})()
+		with patch("birthboard.reminder.scheduler.get_jobs", return_value=[job]):
+			cancel_approval_reminders(record, stage="first")
+		mock_remove.assert_called_once_with(job.id)

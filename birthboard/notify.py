@@ -17,7 +17,12 @@ from app.notification_utils import (
     notification_create,
 )
 
-from birthboard.models import BirthboardRecord, BirthboardParticipant
+from birthboard.models import (
+    BirthboardApprover,
+    BirthboardParticipant,
+    BirthboardRecord,
+    BirthboardSecondApprover,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,3 +278,42 @@ def notify_broadcast_ending_soon(record: BirthboardRecord, end_date):
         )
     except Exception:
         logger.exception('wechat notify: broadcast ending soon failed')
+
+
+# ========== 审核提醒通知 ==========
+
+def notify_approval_reminder(record: BirthboardRecord, stage: str):
+    """审核提醒：通知该阶段所有活跃审核员。stage: 'first' | 'second'"""
+    try:
+        if stage == 'first':
+            approver_qs = BirthboardApprover.objects.filter(is_active=True)
+            title = '生日祝福投放待初审'
+            content = (
+                f'{record.receiver_name} 的生日祝福投放（{record.date}）'
+                '等待你初审，请尽快处理。'
+            )
+        else:
+            approver_qs = BirthboardSecondApprover.objects.filter(is_active=True)
+            title = '生日祝福投放待终审'
+            content = (
+                f'{record.receiver_name} 的生日祝福投放（{record.date}）'
+                '等待你终审，请尽快处理。'
+            )
+        approver_ids = list(approver_qs.values_list('user_id', flat=True))
+        if not approver_ids:
+            return
+        approvers = list(User.objects.filter(id__in=approver_ids))
+        bulk_notification_create(
+            approvers,
+            get_default_sender(),
+            Notification.Type.NEEDREAD,
+            title,
+            content,
+            URL='/birthboard/approve',
+            to_wechat=dict(level=WechatMessageLevel.IMPORTANT),
+        )
+    except Exception:
+        logger.exception(
+            'wechat notify: approval reminder failed stage=%s record_id=%s',
+            stage, record.id,
+        )
