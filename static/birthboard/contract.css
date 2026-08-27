@@ -1,45 +1,74 @@
 html, body {
             margin: 0;
-            background: #181818;
-            color: #ffffff;
+            background: rgb(237, 225, 164);
+            color: #000000;
             font-family: "Microsoft YaHei", "Arial", sans-serif;
+            /* font-weight: var(--bs-body-font-weight); */
+            /* letter-spacing: 1px; */
+            scrollbar-width: none;
+            overflow-x: hidden;
         }
         .contract-container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 60px 40px;
         }
         h1 {
             text-align: center;
             font-size: 28px;
-            margin-bottom: 40px;
+            margin-bottom: 10px;
             letter-spacing: 4px;
         }
+        .contract-intro{
+            text-align: center;
+            margin: auto;
+            background: rgb(237, 225, 164);
+            /* padding: 20px; */
+            max-width: 600px;
+            border-radius: 8px;
+            line-height: 1.8;
+            font-size: 15px;
+            color: #030303;
+            padding-bottom: 350px;
+            padding-top: 220px;
+        }
         .contract-content {
-            background: #222;
-            padding: 32px;
+            background: rgb(237, 225, 164);
+            margin: auto;
+            /* padding: 20px; */
+            max-width: 610px;
             border-radius: 8px;
             line-height: 2;
             font-size: 15px;
-            color: #ccc;
-            margin-bottom: 40px;
+            color: #030303;
+            padding-bottom: 80px;
         }
         .contract-content p {
             margin: 0 0 16px 0;
+            text-indent: 2em;
+        }
+        .contract-content h1 {
+            /* color: #000000; */
+            /* margin-top: 24px; */
+            margin-bottom: 50px;
         }
         .contract-content h3 {
-            color: #fff;
+            /* color: #000000; */
             margin-top: 24px;
             margin-bottom: 12px;
         }
+        .contract-space{
+            margin-top: 400px;
+        }
         .btn-row {
             text-align: center;
+            margin-bottom: 50px;
         }
         #sign-btn {
             display: inline-block;
             padding: 14px 60px;
             font-size: 18px;
-            color: #fff;
+            color: #ffffff;
             background: #c0392b;
             border: none;
             border-radius: 4px;
@@ -54,10 +83,11 @@ html, body {
             background: #555;
             cursor: not-allowed;
         }
-        .signed-hint {
+        /* .signed-hint {
             text-align: center;
             color: #27ae60;
             font-size: 16px;
-            margin-top: 20px;
+            /* margin-top: 50px; 
+            margin-bottom: 50px;
             display: none;
-        }
+        } */

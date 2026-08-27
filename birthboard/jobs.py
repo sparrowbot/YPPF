@@ -555,3 +555,61 @@ def birthboard_nightly_update_2345():
 #         )
 #     finally:
 #         _set_update_lock(False)
+
+
+@periodical(
+    "cron",
+    "birthboard_auto_terminate_stale_waiting",
+    hour=0,
+    minute=10,
+)
+def birthboard_auto_terminate_stale_waiting():
+    """Daily at 00:10: terminate records whose planned date has passed but which
+    never reached READY (still waiting_confirm / waiting_receiver / waiting_approve).
+
+    Refund paid participants and mark TERMINATED (same as abort), then log a
+    REJECT change record with scope auto_terminate_stale.
+    """
+    today = _today_local_date()
+    stale_statuses = [
+        BirthboardRecord.Status.WAITING_CONFIRM,
+        BirthboardRecord.Status.WAITING_RECEIVER,
+        BirthboardRecord.Status.WAITING_APPROVE,
+    ]
+    stale_ids = list(
+        BirthboardRecord.objects.filter(
+            date__lte=today,
+            status__in=stale_statuses,
+        ).values_list("id", flat=True)
+    )
+    logger.info(
+        "[birthboard.jobs] birthboard_auto_terminate_stale_waiting: start today=%s candidates=%s",
+        today,
+        len(stale_ids),
+    )
+    for record_id in stale_ids:
+        with transaction.atomic():
+            locked_record = BirthboardRecord.objects.select_for_update().get(id=record_id)
+            # 加锁后复查，避免与并发审批/付款交错
+            if locked_record.status not in stale_statuses or locked_record.date > today:
+                continue
+            before_status = locked_record.status
+            _refund_paid_participants_and_terminate(locked_record)
+            ChangeRecord.log(
+                record=locked_record,
+                actor=None,
+                action=ChangeRecord.Action.REJECT,
+                before_status=before_status,
+                after_status=locked_record.status,
+                detail={"scope": "auto_terminate_stale", "date": str(locked_record.date)},
+            )
+            logger.info(
+                "[birthboard.jobs] birthboard_auto_terminate_stale_waiting: terminated record_id=%s before=%s after=%s",
+                locked_record.id,
+                before_status,
+                locked_record.status,
+            )
+    logger.info(
+        "[birthboard.jobs] birthboard_auto_terminate_stale_waiting: finished candidates=%s",
+        len(stale_ids),
+    )

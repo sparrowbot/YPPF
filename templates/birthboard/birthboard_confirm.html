@@ -174,7 +174,7 @@
                 {% if activity.record_status == 'ready' or activity.record_status == 'ongoing' %}
                     {% if birthboard_update_in_progress %}
                         <!-- <button type="button" class="btn btn-warning mt-3" disabled>撤销投放</button> -->
-                        <div class="text-muted small mt-1">23点45-24点系统同步中，无法操作</div>
+                        <div class="text-muted small mt-1">系统同步中，无法操作</div>
                     {% else %}
 
                     <table class="lddq" style="width:100%; border-collapse:collapse; margin-top: 18px;">
@@ -195,7 +195,7 @@
                     {% endif %}
                 {% elif activity.record_status == 'waiting_approve' %}
                     {% if birthboard_update_in_progress %}
-                        <div class="text-muted small mt-1">23点45-24点系统同步中，无法操作</div>
+                        <div class="text-muted small mt-1">系统同步中，无法操作</div>
                     {% else %}
                     <table class="lddq" style="width:100%; border-collapse:collapse; margin-top: 18px;">
                         <colgroup>
@@ -433,7 +433,7 @@
                     <div class="mt-3 text-danger font-weight-bold">已拒绝</div>
                 {% elif activity.record_status == 'ready' or activity.record_status == 'ongoing' %}
                     {% if birthboard_update_in_progress %}
-                        <div class="lddq textB">23点45-24点系统同步中，无法操作</div>
+                        <div class="lddq textB">系统同步中，无法操作</div>
                     {% else %}
                     <table class="lddq" style="width:100%; border-collapse:collapse; margin-top: 18px;">
                         <colgroup>
@@ -869,5 +869,15 @@
     mutationObserver.observe(document.body, {childList: true, subtree: true, attributes: true, characterData: true});
 })();
 </script>{% endif %}
+
+{% if request.GET.error == 'concurrency' %}
+<script>
+// 并发冲突：弹出浏览器原生消息框，点击确定后刷新整个页面
+(function() {
+    alert('系统错误，请刷新');
+    window.top.location.reload();
+})();
+</script>
+{% endif %}
 </body>
 </html>

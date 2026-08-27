@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>生日祝福投放审核</title>
-    <link rel="stylesheet" href="{% static 'birthboard/birthboard_approve.css' %}">
+    <link rel="stylesheet" href="{% static 'birthboard/birthboard_approve.css' %}?v=20260827">
 </head>
 <body>
 <div class="container mt-4">
@@ -182,6 +182,7 @@
             <span class="filter-chip" id="filterRelated" data-related="1" style="margin-left:4px;">与你有关</span>
             <button type="button" class="filter-clear" id="filterClear">清除筛选</button>
             <span class="filter-count" id="filterCount"></span>
+            <button type="button" class="filter-chip" id="standardBtn" onclick="showStandardModal()" style="margin-left: auto;">审核标准</button>
         </div>
 
         {% if activity_list %}
@@ -395,6 +396,52 @@
     <img id="imageFullscreenImg" src="" alt="全屏预览" />
 </div>
 
+<!-- 审核标准弹窗 -->
+<div id="standardModal" tabindex="-1" style="display:none; position:fixed; z-index:1100; left:0; top:0; width:100vw; height:100vh; align-items:center; justify-content:center; margin:0; padding:0; background:rgba(0,0,0,0.9);">
+    <div style="width:min(90vw, 820px); max-height:88vh; display:flex; flex-direction:column; background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.9); overflow:hidden;">
+        <div style="padding:18px 24px; background:#e2e2e2; color:#c00000; font-size:28px; font-weight:bold; text-align:center; flex:0 0 auto;">审核标准</div>
+        <div id="standardContent" contenteditable="true" spellcheck="false" style="flex:1 1 auto; overflow:auto; padding:24px; min-height:320px; font-size:16px; line-height:1.9; text-align:left; outline:none; background:#fff; color:#333; font-family:'MyfontT','MyfontE','Microsoft YaHei',sans-serif;">
+
+<h2>一、审核主体</h2>
+<p>由元培设计组与学工老师共同负责，分工协作开展审核工作；学工老师负责终审监督，每周由审核小组汇总下一周投放内容，统一提交学工老师复核。</p >
+<h2>二、审核内容</h2>
+<ul>
+<li>寿星信息：确认寿星为元培学院在册学生、在职老师或地下室楼长，信息真实有效，无虚构、冒用情况。</li>
+<li>海报内容：风格正向、积极健康，贴合生日祝福主题，无违规素材，不涉及侵权、低俗、暴力等元素。</li>
+<li>文案内容：文明得体，围绕生日祝福展开，无侮辱、诽谤、隐私泄露等内容，不涉及敏感话题。</li>
+<li>匿名规范：若选择匿名投放，需确保海报及相关内容中不泄露投放人身份信息。</li>
+
+</ul>
+<h2>三、禁止内容</h2>
+<ul>
+<li><strong>低俗恶搞类</strong>：包含丑化寿星及他人形象、使用怪异低俗元素、恶搞式文案或图案，不符合校园文明及生日祝福氛围的内容。</li>
+<li><strong>暴力色情恐怖类</strong>：涉及血腥、暴力、色情、恐怖图案及文案，包含惊悚画面、低俗暗示、暴力描述等违反公序良俗的内容。</li>
+<li><strong>侮辱诋毁及隐私类</strong>：包含侮辱、诽谤、诋毁寿星或他人的言论；泄露寿星及他人隐私信息，如手机号、宿舍号、身份证号、社交账号、肖像等未获授权的信息。</li>
+<li><strong>敏感及引战类</strong>：涉及敏感政治话题、宗教极端元素；包含地域歧视、性别对立、班级矛盾等引战、煽动矛盾的内容。</li>
+<li><strong>无关宣传类</strong>：发布商业广告、校外机构推广、商品售卖、社团非祝福类宣传等与生日应援无关的内容。</li>
+
+</ul>
+<h2>四、审核流程</h2>
+<ol>
+<li>设计组一审：对初筛通过的内容进行全面复核，核查海报、文案、匿名规范等细节。</li>
+<li>学工二审：每周汇总下一周投放内容，由学工老师进行终审，确认审核结果无异议后生效。</li>
+<li>审核周期：提交申请后一周完成审核，审核意见及时书面告知投放人。</li>
+
+</ol>
+<h2>五、违规处理</h2>
+<ul>
+<li>审核未通过：投放人需在1天内修改内容重新提交，逾期未改视为放弃投放，不扣除元气值。</li>
+<li>投放中发现违规：立即下架内容，扣除投放人全部消耗元气值，禁止其1个月内参与活动。</li>
+<li>情节严重违规：上报学工老师，按学院相关规定处理。</li>
+
+</ul>
+        </div>
+        <div style="padding:14px 24px; display:flex; justify-content:center; gap:12px; flex:0 0 auto; background:#e2e2e2;">
+            <button type="button" class="filter-chip" onclick="hideStandardModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
 <script>
 function showFullscreenImage(src) {
     var overlay = document.getElementById('imageFullscreenOverlay');
@@ -489,6 +536,24 @@ document.querySelectorAll('.approval-image-row img').forEach(function(el) {
 
     // 初始计数
     applyFilter();
+
+    // ---- 审核标准弹窗 ----
+    function showStandardModal() {
+        document.getElementById('standardModal').style.display = 'flex';
+    }
+    function hideStandardModal() {
+        document.getElementById('standardModal').style.display = 'none';
+    }
 </script>
+
+{% if request.GET.error == 'concurrency' %}
+<script>
+// 并发冲突：弹出浏览器原生消息框，点击确定后刷新页面
+(function() {
+    alert('系统错误，请刷新');
+    window.location.reload();
+})();
+</script>
+{% endif %}
 </body>
 </html>
