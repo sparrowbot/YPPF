@@ -127,5 +127,8 @@
     },
     "dormitory": {
         "routine_qa_survey_title": "default title"
+    },
+    "birthboard": {
+        "contact_email": "$BIRTHBOARD_CONTACT_EMAIL$"
     }
 }

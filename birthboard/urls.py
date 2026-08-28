@@ -16,4 +16,7 @@ urlpatterns = [
     path("check_yqpoint/", check_yqpoint, name="check_yqpoint"),
     path("api/check_yqpoint/", check_yqpoint, name="check_yqpoint_api"),
     path("api/confirm_count/", views.confirm_tab_count_api, name="confirm_tab_count_api"),
+    path("api/like_count/", views.birthboard_like_count, name="birthboard_like_count"),
+    path("api/like_add/", views.birthboard_like_add, name="birthboard_like_add"),
+    path("api/reminder_seen/", views.birthboard_reminder_seen, name="birthboard_reminder_seen"),
 ]

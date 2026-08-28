@@ -4,12 +4,13 @@ from datetime import datetime, timedelta
 import logging
 
 from django.db import transaction
-from django.db.models import Q, OuterRef, Subquery, DateTimeField
+from django.db.models import Q, F, OuterRef, Subquery, DateTimeField
 from django.db.models.functions import Coalesce
 from django.core.files.images import get_image_dimensions
 from django.contrib import messages
 
 from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.csrf import csrf_protect
 
 from app.views_dependency import *
 from birthboard.models import (
@@ -21,6 +22,8 @@ from birthboard.models import (
     BirthboardSecondApprover,
     BirthboardContract,
     BirthboardConfirmSeen,
+    BirthboardLike,
+    BirthboardReminderSeen,
 )
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth import get_user_model
@@ -56,7 +59,7 @@ from birthboard.reminder import (
 )
 from playwright.sync_api import sync_playwright
 
-from boot.config import shihannet
+from birthboard.config import shihannet
 
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
 logger = logging.getLogger(__name__)
@@ -367,12 +370,20 @@ def _get_today_entry_reminders(user):
             record__status=ongoing_status,
         ).values_list("record__receiver_name", flat=True).distinct()
     )
+    seen_types = set(
+        BirthboardReminderSeen.objects.filter(user=user, date=today)
+        .values_list("reminder_type", flat=True)
+    )
     return {
         "today": today.isoformat(),
         "has_receiver_today": has_receiver_today,
         "has_sender_today": has_sender_today,
         "receiver_names": receiver_names,
         "sender_names": sender_names,
+        "seen": {
+            "happy": "happy" in seen_types,
+            "bless": "bless" in seen_types,
+        },
     }
 
 
@@ -439,6 +450,42 @@ def birthboard_sign_contract(request):
     contract.signed = True
     contract.signed_at = timezone.now()
     contract.save(update_fields=["signed", "signed_at"])
+    return JsonResponse({"ok": True})
+
+
+@login_required(redirect_field_name="origin")
+@require_http_methods(["GET"])
+def birthboard_like_count(request):
+    """制作名单累计点赞量查询接口：返回当前累计值。"""
+    like, _ = BirthboardLike.objects.get_or_create(pk=1)
+    return JsonResponse({"count": like.count})
+
+
+@login_required(redirect_field_name="origin")
+@require_http_methods(["POST"])
+def birthboard_like_add(request):
+    """制作名单点赞接口：累计点赞量 +1，返回新值。"""
+    like, _ = BirthboardLike.objects.get_or_create(pk=1)
+    BirthboardLike.objects.filter(pk=like.pk).update(count=F("count") + 1)
+    like.refresh_from_db()
+    return JsonResponse({"count": like.count})
+
+
+@csrf_protect
+@login_required(redirect_field_name="origin")
+@require_http_methods(["POST"])
+def birthboard_reminder_seen(request):
+    """记录今日提醒（happy/bless）已展示：服务端去重，跨设备有效。"""
+    reminder_type = request.POST.get("type")
+    if reminder_type not in ("happy", "bless"):
+        return JsonResponse({"ok": False, "error": "invalid type"}, status=400)
+    now = timezone.now()
+    today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+    BirthboardReminderSeen.objects.get_or_create(
+        user=request.user,
+        date=today,
+        reminder_type=reminder_type,
+    )
     return JsonResponse({"ok": True})
 
 

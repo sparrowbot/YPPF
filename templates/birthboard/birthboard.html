@@ -49,11 +49,13 @@
                 <img src="{{ MEDIA_URL }}birthboard/sky_small.webp" alt="sky" class="parallax-layer" decoding="async" style="width:100%; display:block; position:fixed; left:0; right:0; user-select:none; pointer-events:none; margin:auto;">
             </picture>
             <img id="desktop-layer-lines" src="{{ MEDIA_URL }}birthboard/lines_small.webp" alt="lines" decoding="async" style="grid-area: 1/1; width:100%; display:block; z-index: 7; position: absolute; top:0; left:0; transform-origin:0 0; width: 1920px; pointer-events: none;" class="wid-control">
+            <img id="desktop-layer-lines2" src="{{ MEDIA_URL }}birthboard/lines_small2.webp" alt="lines2" decoding="async" style="grid-area: 1/1; width:100%; display:block; z-index: 5; position: absolute; top:0; left:0; transform-origin:0 0; width: 1920px; pointer-events: none;" class="wid-control">
             <!-- ===== 手机版静态图层（初始隐藏） ===== -->
             <img id="phone-layer-back" src="{{ MEDIA_URL }}birthboard/phone/phone_back.webp" alt="phoneback" decoding="async" style="grid-area: 1/1; width:100%; display:none; z-index: 3; position:relative; pointer-events:none; user-select:none;">
             <img id="phone-layer-word" src="{{ MEDIA_URL }}birthboard/phone/phone_word.webp" alt="phoneword" decoding="async" style="grid-area: 1/1; width:100%; display:none; z-index: 8; position:relative; pointer-events:none; user-select:none;">
             <img id="phone-layer-tree" src="{{ MEDIA_URL }}birthboard/phone/phone_tree.webp" alt="phonetree" decoding="async" style="grid-area: 1/1; width:100%; display:none; z-index: 10; position:relative; pointer-events:none; user-select:none;">
             <img id="phone-layer-lines" src="{{ MEDIA_URL }}birthboard/phone/phone_line.webp" alt="phonelines" decoding="async" style="grid-area: 1/1; width:100%; display:none; z-index: 9; position:relative; pointer-events:none; user-select:none;">
+            <img id="phone-layer-lines2" src="{{ MEDIA_URL }}birthboard/phone/phone_line2.webp" alt="phonelines2" decoding="async" style="grid-area: 1/1; width:100%; display:none; z-index: 5; position:relative; pointer-events:none; user-select:none;">
         </div>
         <form id="birthboard-form" class="wid-control" method="post" enctype="multipart/form-data" target="birthboard-submit-target" style="position:absolute; top:0; left:0; width:1920px; transform-origin:0 0; z-index:5; overflow:hidden;">
             <a href="/birthboard/approve/" style="position:absolute; top:656px; right:740px; width:40px; height:40px; background:#ffffff; cursor:pointer; display:block; z-index:100;" title="审核管理"></a>
@@ -195,13 +197,33 @@
     <div class="wid-control" id="confirm-section" style="background-color: #eee1a5; position:relative; z-index:10; ">
         <!-- <img src="{{ MEDIA_URL }}birthboard/b2w.png" alt="trans" style="width:100%; height:auto; margin:0 auto;"> -->
         <iframe id="confirm-iframe" src="/birthboard/confirm/" style="width: 100%; height: 200px; border: none;" scrolling="no"></iframe>
-      <div>
-        <div>
-          <a href="\birthboard\contract\">用户协议</a>
-          <a href="">制作名单</a>
-          <a href="">联系我们</a>
+      <div style="padding-bottom: 370px;">
+        <div style="text-align:center; margin-bottom: 30px;">
+          <!-- <img src="{{ MEDIA_URL }}\birthboard\logo.png" alt="生日灯牌" style="max-width: 500px; height: auto; display: block; margin: 0 auto 20px;"> -->
+          <table class="lddq" style="width:100%; border-collapse:collapse; margin:0 auto; max-width: var(--bb-footer-max-w, 480px);">
+            <colgroup>
+              <col style="width: 29%;">
+              <col style="width: 6.5%;">
+              <col style="width: 29%;">
+              <col style="width: 6.5%;">
+              <col style="width: 29%;">
+            </colgroup>
+            <tr>
+              <td style="text-align:center;">
+                <button type="button" class="downbtn textN" onclick="window.location.href='/birthboard/contract/'">用户协议</button>
+              </td>
+              <td></td>
+              <td style="text-align:center;">
+                <button type="button" class="downbtn textN" onclick="showLikeModal()">制作名单</button>
+              </td>
+              <td></td>
+              <td style="text-align:center;">
+                {% if contact_email %}<button type="button" class="downbtn textN" onclick="window.location.href='mailto:{{ contact_email }}'">联系我们</button>{% else %}<button type="button" class="downbtn textN">联系我们</button>{% endif %}
+              </td>
+            </tr>
+          </table>
         </div>
-        <div>
+        <div style="text-align:center; position: relative; z-index: 100001;" class="textN">
           <span>© 2026 叁拾伍圆设计实验室 · 智慧书院</span>
         </div>
 
@@ -224,16 +246,16 @@
     >
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/checkback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button id="modal-cancel-btn" style="
+        <button id="modal-cancel-btn" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/checkrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/checkrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/checkrightlight.webp)'"></button>
-        <button id="modal-confirm-charge-btn" style="
+        "></button>
+        <button id="modal-confirm-charge-btn" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/checkleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/checkleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/checkleftlight.webp)'"></button>
+        "></button>
       </div>
     </div>
 
@@ -258,20 +280,20 @@
           display:flex; align-items:center; justify-content:center;
           text-align:center; color:#9a0000; font-family: 'Numbers', 'MyfontC'; font-size: 35px; line-height:1.5;
         "><span style="font-size: 20px; color:#000000; margin-top: 8px;">仅有&ensp;</span>0<span style="font-size: 20px; color:#000000; margin-top: 8px;">&ensp;元气值</span></div>
-        <button class="insufficient-balance-confirm-btn" style="
+        <button class="insufficient-balance-confirm-btn bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/outleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/outleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/outleftlight.webp)'"></button>
-        <button class="insufficient-balance-confirm-btn" style="
+        "></button>
+        <button class="insufficient-balance-confirm-btn bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/outrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/outrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/outrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
 
-    <!-- 今日生日提醒弹窗 -->
+    <!-- 今日生日提醒弹窗（寿星 / 参与者两种背景图，按提醒类型切换） -->
     <div
       id="todayReminderModal"
       class="fullscreen-overlay"
@@ -286,14 +308,31 @@
       ">
       <div
         style="
-          background: var(--bs-color);
-          max-width: 380px;
-          margin: 15vh auto;
-          padding: 24px 20px;
-          text-align: center;
+          position: relative;
+          display: inline-block;
+          margin: var(--popup-margin-top) auto;
+          left: 50%;
+          transform: translateX(-50%);
         ">
-        <div id="today-reminder-text" style="margin-bottom: 18px"></div>
-        <button id="today-reminder-confirm-btn">确定</button>
+        <img
+          id="today-reminder-back"
+          class="bb-reminder-back hpbtd-size"
+          src="{{ MEDIA_URL }}birthboard/popup/hpbtdback.png"
+          style="
+            display: block;
+          "
+        />
+        
+        <button
+          id="today-reminder-confirm-btn"
+          class="bb-reminder-btn hpbtd-size"
+          style="
+            background: url('{{ MEDIA_URL }}birthboard/popup/hpbtdbuttom.png')
+              no-repeat center / 100% 100%;
+            border: none;
+            cursor: pointer;
+          "
+        ></button>
       </div>
     </div>
 
@@ -302,64 +341,64 @@
     <div id="confirm-reject-received-modal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; background:rgba(0,0,0,0.4);">
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/rejectback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button data-action="cancel" style="
+        <button data-action="cancel" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/rejectleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/rejectleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/rejectleftlight.webp)'"></button>
-        <button data-action="confirm" style="
+        "></button>
+        <button data-action="confirm" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/rejectrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/rejectrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/rejectrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
     <!-- 参与者拒绝弹窗 -->
     <div id="confirm-reject-participation-modal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; background:rgba(0,0,0,0.4);">
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/denyback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button data-action="cancel" style="
+        <button data-action="cancel" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/denyleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/denyleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/denyleftlight.webp)'"></button>
-        <button data-action="confirm" style="
+        "></button>
+        <button data-action="confirm" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/denyrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/denyrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/denyrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
     <!-- 撤销确认弹窗 -->
     <div id="confirm-revoke-modal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; background:rgba(0,0,0,0.4);">
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/cancelback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button data-action="cancel" style="
+        <button data-action="cancel" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/cancelleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/cancelleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/cancelleftlight.webp)'"></button>
-        <button data-action="confirm" style="
+        "></button>
+        <button data-action="confirm" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/cancelrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/cancelrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/cancelrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
     <!-- 中止投放弹窗 -->
     <div id="confirm-abort-modal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; background:rgba(0,0,0,0.4);">
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/pullbackback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button data-action="cancel" style="
+        <button data-action="cancel" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/pullbackleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/pullbackleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/pullbackleftlight.webp)'"></button>
-        <button data-action="confirm" style="
+        "></button>
+        <button data-action="confirm" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/pullbackrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/pullbackrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/pullbackrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
     <!-- 全屏图片弹窗 -->
@@ -373,18 +412,123 @@
     <div id="confirm-preview-modal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100vw; background:rgba(0,0,0,0.4);">
       <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
         <img src="{{ MEDIA_URL }}birthboard/popup/revealback.webp" style="display:block; max-width:var(--popup-img-max-w); max-height:var(--popup-img-max-h); width:auto; height:auto;">
-        <button data-action="confirm" style="
+        <button data-action="confirm" class="bb-popup-btn" style="
           position:absolute; left:var(--popup-btn-left); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/revealleftlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/revealleftdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/revealleftlight.webp)'"></button>
-        <button data-action="cancel" style="
+        "></button>
+        <button data-action="cancel" class="bb-popup-btn" style="
           position:absolute; right:var(--popup-btn-right); bottom:var(--popup-btn-bottom); width:var(--popup-btn-width); height:var(--popup-btn-height);
           background:url('{{ MEDIA_URL }}birthboard/popup/revealrightlight.webp') no-repeat center/100% 100%;
           border:none; cursor:pointer;
-        " onmouseover="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/revealrightdark.webp)'" onmouseout="this.style.backgroundImage='url({{ MEDIA_URL }}birthboard/popup/revealrightlight.webp)'"></button>
+        "></button>
       </div>
     </div>
+
+    <!-- 制作名单点赞弹窗（先用现有弹窗图占位，中间只读计数器，图片内按钮点击 +1，点弹窗外部关闭） -->
+    <div id="likeModal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); animation: bb-fade-in 3s ease;">
+      <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
+        <img class="bb-reminder-back hpbtd-size" src="{{ MEDIA_URL }}birthboard/contributor/contributorback.png" style="display:block;">
+        <!-- 制作名单：两个机构分组 + 人员名单 -->
+        <div id="contributor-list" style="position:absolute; left:50%; top:42%; transform:translate(-50%,-50%); width:82%; text-align:left; font-family:'MyfontC','MyfontE','Microsoft YaHei','Arial',sans-serif; color:#000000; pointer-events:none;">
+          <div style="display:flex; align-items:flex-start; gap:7vw;">
+            <div>
+              <div style="font-size:22px; font-weight:bold; margin-bottom:10px;">叁拾伍圆设计实验室</div>
+              <div style="margin-top:30px; display:flex; font-size:22px; gap:2vw;">
+                <div style="line-height:2.3;">黄柯翰<br>郑申越<br>冯品嘉<br>陈双本<br>朱颖诺</div>
+                <div style="line-height:2.3;">李明彦<br>李佳镁<br>汤家乐<br>刘&emsp;传<br>景璧辉</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:22px; font-weight:bold; margin-bottom:10px;">智慧书院</div>
+              <div style="margin-top:30px; font-size:22px; line-height:2.3;">袁纳海<br>张庭瑞<br>高志远<br>唐明川</div>
+            </div>
+          </div>
+        </div>
+        <div style="position:absolute; left:8%; bottom:var(--hpbtd-btn-bottom); display:flex; align-items:center; gap:1.2vw;">
+          <button type="button" id="like-btn" class="bb-reminder-btn hpbtd-size" onclick="likePlus(event)" title="点赞" style="
+            position:static; left:auto; bottom:auto; transform:none;
+            background:url('{{ MEDIA_URL }}birthboard/contributor/contributorbuttom1.png') no-repeat center/100% 100%;
+            border:none; cursor:pointer;
+          "></button>
+          <div id="like-count" style="margin-left:2vw; transform:translateY(-3px); font-family:'Numbers','MyfontC'; font-size:44px; color:rgb(255, 166, 0); -webkit-text-stroke:1px rgb(0, 0, 0); line-height:1; pointer-events:none; white-space:nowrap;">0</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // 制作名单点赞弹窗：累计点赞量储存在后台，点击点赞按钮 +1，点击弹窗外部关闭
+      var likeCount = 0;
+      // 制作名单弹窗淡入淡出（各 3 秒）
+      var likeModalHideTimer = null;
+      function showLikeModal() {
+        var el = document.getElementById('likeModal');
+        if (likeModalHideTimer) {
+          clearTimeout(likeModalHideTimer);
+          likeModalHideTimer = null;
+        }
+        el.style.display = 'block';
+        // 清除上次淡出动画残留的 fill 透明度，避免直接以透明状态出现
+        el.style.opacity = '';
+        // 重新触发淡入动画（先移除再重设，确保动画每次都从 0 播放）
+        el.style.animation = 'none';
+        void el.offsetWidth; // 强制 reflow
+        el.style.animation = 'bb-fade-in 3s ease';
+        // 打开时从后台读取当前累计点赞量
+        fetch('/birthboard/api/like_count/')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            likeCount = d.count || 0;
+            document.getElementById('like-count').textContent = likeCount;
+          })
+          .catch(function () {});
+      }
+      function closeLikeModal() {
+        var el = document.getElementById('likeModal');
+        if (likeModalHideTimer) {
+          clearTimeout(likeModalHideTimer);
+        }
+        // forwards 保持淡出结束后的透明状态，避免动画播完瞬间跳回不透明
+        el.style.animation = 'bb-fade-out 1s ease forwards';
+        likeModalHideTimer = setTimeout(function () {
+          el.style.display = 'none';
+          // 复位为淡入动画，下次打开可直接淡入
+          el.style.animation = 'bb-fade-in 3s ease';
+        }, 1000);
+      }
+      // 制作名单点赞按钮：14 种图标随机切换（每次点击换一个）
+      var contributorButtonCount = 14;
+      var currentContributorBtn = 1;
+      function randomContributorButton() {
+        // 随机选一个与当前不同的图标序号（1..14）
+        var next;
+        do {
+          next = Math.floor(Math.random() * contributorButtonCount) + 1;
+        } while (next === currentContributorBtn && contributorButtonCount > 1);
+        currentContributorBtn = next;
+        document.getElementById('like-btn').style.backgroundImage =
+          "url('{{ MEDIA_URL }}birthboard/contributor/contributorbuttom" + next + ".png')";
+      }
+      function likePlus(e) {
+        if (e) e.stopPropagation();
+        // 每次点击随机切换按钮图标
+        randomContributorButton();
+        // 后台 +1，用返回的最新值更新显示
+        fetch('/birthboard/api/like_add/', { method: 'POST' })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            likeCount = d.count || (likeCount + 1);
+            document.getElementById('like-count').textContent = likeCount;
+          })
+          .catch(function () {
+            likeCount += 1;
+            document.getElementById('like-count').textContent = likeCount;
+          });
+      }
+      document.getElementById('likeModal').addEventListener('click', function (e) {
+        if (e.target === this) closeLikeModal();
+      });
+    </script>
 
     <!-- jQuery 必须在 select2 之前引入 -->
     <script src="{% static 'Appointment/assets/js/jquery.min.js' %}"></script>
@@ -397,6 +541,67 @@
     </script>
     {% endif %} {{insufficient_balance|default:''|json_script:'insufficient-balance-data' }}
     {{ today_entry_reminders|default:''|json_script:'today-entry-reminders-data'}} {{birthboard_date_rule|default:''|json_script:'birthboard-date-rule-data' }}
+    <script>
+      // 页脚按钮悬停：在按钮上方浮出一个 4:3 提示卡片（JS 控制显示/隐藏与定位，抽屉式滑出）
+      (function () {
+        var section = document.getElementById('confirm-section');
+
+        // 遮罩隐藏延时定时器：鼠标移开后延迟 0.5s 再隐藏，等抽屉收回动画结束
+        var maskHideTimer = null;
+
+        var tip = document.createElement('div');
+        tip.className = 'bb-footer-tip';
+        var tipImg = document.createElement('img');
+        tipImg.src = '{{ MEDIA_URL }}birthboard/logoone.png';
+        tipImg.alt = '';
+        tip.appendChild(tipImg);
+
+        // 三个按钮各自对应的 logo：用户协议 → one，制作名单 → two，联系我们 → three
+        var tipImgs = [
+          '{{ MEDIA_URL }}birthboard/logoone.png',
+          '{{ MEDIA_URL }}birthboard/logotwo.png',
+          '{{ MEDIA_URL }}birthboard/logothree.png'
+        ];
+
+        // 抽屉遮罩：盖住按钮及以下，卡片滑出时在该区域被遮挡，像从按钮后面抽出
+        var mask = document.createElement('div');
+        mask.className = 'bb-footer-mask';
+
+        section.appendChild(tip);
+        section.appendChild(mask);
+
+        var btns = section.querySelectorAll('.downbtn');
+        btns.forEach(function (btn, index) {
+          btn.addEventListener('mouseenter', function () {
+            // 如果之前有未执行的遮罩隐藏延时，先取消，避免移出后又隐藏
+            clearTimeout(maskHideTimer);
+
+            var r = btn.getBoundingClientRect();
+            var tipH = tip.offsetHeight;
+            // 按按钮顺序切换对应的 logo 图
+            tipImg.src = tipImgs[index % tipImgs.length];
+            tip.style.left = (r.left + r.width / 2) + 'px';
+            tip.style.top = (r.top - tipH - 10) + 'px';
+            tip.classList.add('visible');
+
+            // 遮罩覆盖按钮及以下区域（卡片滑动经过的部分）
+            mask.style.left = (r.left + r.width / 2 - 80) + 'px';
+            mask.style.width = '160px';
+            mask.style.top = r.top + 'px';
+            mask.style.height = (tipH + 20) + 'px';
+            mask.style.display = 'block';
+          });
+          btn.addEventListener('mouseleave', function () {
+            tip.classList.remove('visible');
+            // 遮罩延时 0.5s 再隐藏，等抽屉收回动画完全结束
+            clearTimeout(maskHideTimer);
+            maskHideTimer = setTimeout(function () {
+              mask.style.display = 'none';
+            }, 500);
+          });
+        });
+      })();
+    </script>
     <script>
         const container = document.getElementById('parallax-container');
         const layers = document.querySelectorAll('.parallax-layer');
@@ -419,10 +624,12 @@
                 document.getElementById('desktop-layer-stars').style.display = 'none';
                 document.getElementById('desktop-layer-sky').style.display = 'none';
                 document.getElementById('desktop-layer-lines').style.display = 'none';
+                document.getElementById('desktop-layer-lines2').style.display = 'none';
                 document.getElementById('phone-layer-back').style.display = 'block';
                 document.getElementById('phone-layer-word').style.display = 'block';
                 document.getElementById('phone-layer-tree').style.display = 'block';
                 document.getElementById('phone-layer-lines').style.display = 'block';
+                document.getElementById('phone-layer-lines2').style.display = 'block';
                 document.querySelector('a[href="/birthboard/approve/"]').style.display = 'none';
                 document.documentElement.style.setProperty('--bs-body-font-size', '84px');
                 document.documentElement.style.setProperty('--bs-sup-font-size', '48px');
@@ -461,6 +668,14 @@
                 document.documentElement.style.setProperty('--popup-margin-top', '15vh');
                 document.documentElement.style.setProperty('--popup-img-max-w', '70vw');
                 document.documentElement.style.setProperty('--popup-img-max-h', '70vh');
+                // 手机版今日提醒 hpbtd（寿星）专用数值（在此修改数值）
+                document.documentElement.style.setProperty('--hpbtd-back-width', '70vw');
+                document.documentElement.style.setProperty('--hpbtd-btn-left', '90%');
+                document.documentElement.style.setProperty('--hpbtd-btn-bottom', '10%');
+                document.documentElement.style.setProperty('--hpbtd-btn-width', '8vw');
+                // 手机版页脚：字号与宽度缩小（桌面走 fallback 16px / 480px）
+                document.documentElement.style.setProperty('--bb-footer-font-size', '13px');
+                document.documentElement.style.setProperty('--bb-footer-max-w', '88vw');
                 layers.forEach(function(layer) { layer.style.transform = ''; });
             }
             if(_isiPhone){
@@ -1034,25 +1249,14 @@
           ? JSON.parse(dateRuleScript.textContent)
           : {};
         
-        const reminderUserId = "{{ request.user.username|escapejs }}";
-        const reminderDate = todayReminders.today || "";
-        const reminderStoragePrefix =
-          "birthboard_today_reminder:" +
-          reminderUserId +
-          ":" +
-          reminderDate +
-          ":";
+        // 今日提醒文案显示姓名（无姓名时回退到用户名）
+        const reminderUserName =
+          "{{ request.user.get_full_name|default:request.user.username|escapejs }}";
         const reminderQueue = [];
-        let happyDismissed = false;
-        let blessDismissed = false;
-        try {
-          happyDismissed =
-            localStorage.getItem(reminderStoragePrefix + "happy") === "1";
-          blessDismissed =
-            localStorage.getItem(reminderStoragePrefix + "bless") === "1";
-        } catch (e) {
-          // console.log('[DEBUG] localStorage unavailable for reminder state', e);
-        }
+        // 是否已展示过由后端记录（跨设备去重），不再依赖 localStorage
+        const seenReminders = todayReminders.seen || {};
+        const happyDismissed = seenReminders.happy === true;
+        const blessDismissed = seenReminders.bless === true;
         const receiverNames = Array.isArray(todayReminders.receiver_names)
           ? todayReminders.receiver_names.filter(Boolean)
           : [];
@@ -1074,16 +1278,29 @@
           }
           const nextType = reminderQueue.shift();
           currentReminderType = nextType;
+          const reminderBack = document.getElementById("today-reminder-back");
+          const reminderBtn = document.getElementById(
+            "today-reminder-confirm-btn",
+          );
           if (nextType === "happy") {
             $("#today-reminder-text").text(
-              "生日快乐！今天是你的生日投放日，祝你今天开心顺利！",
             );
+            reminderBack.src = "{{ MEDIA_URL }}birthboard/popup/hpbtdback.png";
+            reminderBack.classList.add("hpbtd-size");
+            reminderBtn.style.backgroundImage =
+              "url('{{ MEDIA_URL }}birthboard/popup/hpbtdbuttom.png')";
+            reminderBtn.classList.add("hpbtd-size");
+            reminderBtn.style.aspectRatio = "193 / 199";
           } else {
             $("#today-reminder-text").text(
-              "今天有你参与的生日投放，请记得送上祝福：" +
-                senderNames.join("、") +
-                " 生日快乐！",
             );
+            reminderBack.src =
+              "{{ MEDIA_URL }}birthboard/popup/tosenderback.png";
+            reminderBack.classList.remove("hpbtd-size");
+            reminderBtn.style.backgroundImage =
+              "url('{{ MEDIA_URL }}birthboard/popup/tosenderbuttom.png')";
+            reminderBtn.classList.remove("hpbtd-size");
+            reminderBtn.style.aspectRatio = "341 / 180";
           }
           $("#todayReminderModal").show();
         }
@@ -1091,14 +1308,15 @@
         $("#today-reminder-confirm-btn").on("click", function () {
           $("#todayReminderModal").hide();
           if (currentReminderType) {
-            try {
-              localStorage.setItem(
-                reminderStoragePrefix + currentReminderType,
-                "1",
-              );
-            } catch (e) {
-              // console.log('[DEBUG] localStorage write failed for reminder state', e);
-            }
+            // 服务端记录已展示（跨设备去重），不再写 localStorage
+            fetch("/birthboard/api/reminder_seen/", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": "{{ csrf_token }}",
+              },
+              body: "type=" + encodeURIComponent(currentReminderType),
+            }).catch(function () {});
           }
           showNextTodayReminder();
         });

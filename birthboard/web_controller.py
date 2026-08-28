@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any
 from time import perf_counter
-from boot.config import shihannet
+from birthboard.config import shihannet
 
 def _step_result(ok, retryable=False, pending=None, result=None, error=None):
     return {

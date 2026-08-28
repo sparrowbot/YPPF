@@ -29,7 +29,6 @@ __all__ = [
     'BASE_DIR',
     'ROOT_CONFIG',
     'GLOBAL_CONFIG',
-    'shihannet',
 ]
 
 
@@ -73,12 +72,3 @@ class GlobalConfig(Config):
 
 
 GLOBAL_CONFIG = GlobalConfig(ROOT_CONFIG, 'global')
-
-
-class ShihannetConfig(Config):
-    username = LazySetting('username', default='', type=str)
-    password = LazySetting('password', default='', type=str)
-    url = LazySetting('url', default='', type=str)
-
-
-shihannet = ShihannetConfig(ROOT_CONFIG.get('shihannet', {}))

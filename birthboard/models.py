@@ -10,6 +10,8 @@ __all__ = [
     'BirthboardParticipant',
     'BirthboardContract',
     'BirthboardConfirmSeen',
+    'BirthboardLike',
+    'BirthboardReminderSeen',
 ]
 
 # Create your models here.
@@ -193,3 +195,34 @@ def add_birthboard_approver_by_username(username):
     user = User.objects.get(username=username)
     from birthboard.models import BirthboardApprover
     BirthboardApprover.objects.get_or_create(user=user, defaults={"is_active": True})
+
+
+class BirthboardLike(models.Model):
+    """制作名单累计点赞量（单例，主键固定为 1）。"""
+    count = models.PositiveIntegerField('累计点赞量', default=0)
+
+    class Meta:
+        verbose_name = '制作名单点赞量'
+        verbose_name_plural = '制作名单点赞量'
+
+
+class BirthboardReminderSeen(models.Model):
+    """今日提醒（happy/bless）已展示记录：服务端去重，跨设备有效。"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='birthboard_reminder_seen',
+    )
+    date = models.DateField('提醒日期')
+    reminder_type = models.CharField('提醒类型', max_length=16)  # happy / bless
+    seen_at = models.DateTimeField('标记时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '生日提醒已读记录'
+        verbose_name_plural = '生日提醒已读记录'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'date', 'reminder_type'],
+                name='uniq_birthboard_reminder_seen',
+            ),
+        ]

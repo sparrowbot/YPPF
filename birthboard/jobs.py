@@ -345,7 +345,7 @@ def birthboard_nightly_update_2345():
     # lazy imports for playright-dependent modules
     from playwright.sync_api import sync_playwright
     from birthboard.web_controller import open_and_login, _run_update_cycle
-    from boot.config import shihannet
+    from birthboard.config import shihannet
 
     to_start = []
     to_stop = []

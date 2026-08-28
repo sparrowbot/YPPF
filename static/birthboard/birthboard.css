@@ -82,6 +82,13 @@ html {
             --pos-mode-dropdown: 20px;
             --pos-dropdown-width: 500px;
             --pos-dropdown-height: 250px;
+
+            /* ===== 今日提醒 hpbtd（寿星）专用数值（手机适配在 JS initPhoneLayers 中覆盖） ===== */
+            --hpbtd-back-width: 50vw;
+            --hpbtd-btn-left: 90%;
+            --hpbtd-btn-bottom: 10%;
+            --hpbtd-btn-width: 4vw;
+            --hpbtd-btn-ratio: 193 / 199;
         }
         /* 定义你的自定义主题容器类 */
         .select2-container--my-custom-theme {
@@ -571,6 +578,48 @@ html {
             height: 100dvh;
         }
 
+        /* 弹窗图片按钮：hover 时颜色加深 20%（无需 dark 版图片） */
+        #today-reminder-confirm-btn,
+        .bb-popup-btn {
+            transition: filter 0.3s ease;
+        }
+        #today-reminder-confirm-btn:hover,
+        .bb-reminder-btn:hover,
+        .bb-popup-btn:hover {
+            filter: brightness(0.8);
+        }
+
+        /* 今日提醒弹窗背景图：参与者(tosender)与其他弹窗一致，寿星(hpbtd)用设计稿宽度 */
+        .bb-reminder-back {
+            max-width: var(--popup-img-max-w);
+            max-height: var(--popup-img-max-h);
+            width: auto;
+            height: auto;
+        }
+        .bb-reminder-back.hpbtd-size {
+            max-width: none;
+            max-height: none;
+            width: var(--hpbtd-back-width);
+            height: auto;
+        }
+
+        /* 今日提醒弹窗确认按钮：参与者(tosender)居中，寿星(hpbtd)用设计稿数值 */
+        .bb-reminder-btn {
+            position: absolute;
+            left: 50%;
+            bottom: var(--popup-btn-bottom);
+            transform: translateX(-50%);
+            width: var(--popup-btn-width);
+            height: var(--popup-btn-height);
+        }
+        .bb-reminder-btn.hpbtd-size {
+            left: var(--hpbtd-btn-left);
+            bottom: var(--hpbtd-btn-bottom);
+            width: var(--hpbtd-btn-width);
+            height: auto;
+            aspect-ratio: var(--hpbtd-btn-ratio);
+        }
+
         /* ===== 页面加载遮罩 ===== */
         #page-loading {
             position: fixed;
@@ -632,4 +681,89 @@ html {
           border: none;
           pointer-events: none;
           filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.253));
+        }
+
+        /* ===== 点赞弹窗淡入淡出 ===== */
+        @keyframes bb-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes bb-fade-out {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+
+        /* ===== 页脚链接（复刻 confirm 页面 .downbtn：置于 lddq 表格单元格内，块级整行 + 顶部黑线 + 悬停下划线从左展开） ===== */
+        .downbtn {
+          display: block;
+          position: relative;
+          z-index: 10001; /* 让按钮盖住滑出的卡片与遮罩（在同一 confirm-section 堆叠上下文内） */
+          border: none;
+          border-top: 1px solid #000000;
+          padding: 0;
+          padding-bottom: 3px;
+          margin: 0;
+          width: 100%;
+          font-family: inherit;
+          font-size: inherit;
+          text-align: inherit;
+          color: #000000;
+          background-color: transparent;
+          cursor: pointer;
+          background: linear-gradient(to right, #ffffff00, #ffffff00) no-repeat bottom left / 0 1px;
+          background-origin: content-box;
+          transition: background-size 0.25s ease;
+        }
+        .downbtn:hover {
+          color: #000000;
+          background: linear-gradient(to right, #000000, #000000) no-repeat bottom left / 100% 1px;
+        }
+
+        /* ===== 页脚按钮上方浮出的 4:3 提示卡片（由 JS 控制显示/隐藏与定位，抽屉式上下滑出） ===== */
+        .bb-footer-tip {
+          position: fixed;
+          z-index: 10;
+          width: 140px;
+          height: auto; /* 长宽比 4:3 */
+          overflow: hidden;
+          /* box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18); */
+          /* 初始：卡片叠在按钮顶部（向下偏移一个卡片高度），像收起的抽屉 */
+          transform: translate(-50%, 120%);
+          visibility: hidden;
+          transition: transform 0.25s ease, visibility 0s linear 0.25s;
+          pointer-events: none;
+        }
+        .bb-footer-tip.visible {
+          /* 抽屉向上滑出，露出按钮上方的卡片 */
+          visibility: visible;
+          transform: translate(-50%, 0);
+          transition: transform 0.25s ease, visibility 0s;
+        }
+        .bb-footer-tip img {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        /* ===== 抽屉遮罩：盖住按钮及以下区域，让卡片像从按钮后面抽出 ===== */
+        .bb-footer-mask {
+          position: fixed;
+          z-index: 15; /* 高于卡片(9999)，低于按钮(10001) */
+          background: #eee1a5; /* 与页脚背景同色，视觉上融合 */
+          pointer-events: none;
+          display: none;
+        }
+
+        /* ===== 页脚表格（复刻 confirm 页面的 .textN / .lddq） ===== */
+        .textN {
+          font-family: 'MyfontC', 'MyfontE', 'Microsoft YaHei', 'Arial', sans-serif;
+          font-size: var(--bb-footer-font-size, 16px);
+        }
+        .lddq {
+          width: 100%;
+          max-width: var(--bb-footer-max-w, 480px);
+          text-align: justify;
+          text-align-last: justify;
+          text-justify: inter-ideograph;
         }

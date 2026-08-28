@@ -629,3 +629,73 @@ class BirthboardConcurrencyFixTests(TestCase):
 			img2, ddate(2026, 8, 28), submit_time=submit
 		)
 		self.assertEqual(name2, '20260828_202608281030_orig_2.jpg')
+
+
+class BirthboardLikeTests(TestCase):
+	"""制作名单点赞量接口测试。"""
+
+	def setUp(self):
+		self.user = User.objects.create_user(username="liker", name="Liker", password="test")
+		from birthboard.models import BirthboardContract
+		BirthboardContract.objects.create(user=self.user, signed=True)
+		self.client.login(username="liker", password="test")
+
+	def test_like_count_initial_zero(self):
+		"""初始累计点赞量为 0。"""
+		resp = self.client.get("/birthboard/api/like_count/")
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.json()["count"], 0)
+
+	def test_like_add_increments_and_accumulates(self):
+		"""点赞接口每次 +1，并跨请求累积。"""
+		self.assertEqual(self.client.post("/birthboard/api/like_add/").json()["count"], 1)
+		self.assertEqual(self.client.post("/birthboard/api/like_add/").json()["count"], 2)
+		resp = self.client.get("/birthboard/api/like_count/")
+		self.assertEqual(resp.json()["count"], 2)
+
+	def test_like_requires_login(self):
+		"""未登录访问点赞接口应被重定向。"""
+		self.client.logout()
+		resp = self.client.get("/birthboard/api/like_count/")
+		self.assertEqual(resp.status_code, 302)
+
+
+class BirthboardReminderSeenTests(TestCase):
+	"""今日提醒已读标记（服务端去重）接口测试。"""
+
+	def setUp(self):
+		self.user = User.objects.create_user(username="reminder_user", name="提醒测试", password="test")
+		from birthboard.models import BirthboardContract
+		BirthboardContract.objects.create(user=self.user, signed=True)
+		self.client.login(username="reminder_user", password="test")
+
+	def test_mark_seen_creates_record(self):
+		"""POST happy 后创建已读记录，重复标记不重复。"""
+		from birthboard.models import BirthboardReminderSeen
+		resp = self.client.post("/birthboard/api/reminder_seen/", {"type": "happy"})
+		self.assertEqual(resp.status_code, 200)
+		self.assertTrue(resp.json()["ok"])
+		self.assertEqual(BirthboardReminderSeen.objects.count(), 1)
+		self.client.post("/birthboard/api/reminder_seen/", {"type": "happy"})
+		self.assertEqual(BirthboardReminderSeen.objects.count(), 1)
+
+	def test_invalid_type_rejected(self):
+		"""无效 type 返回 400。"""
+		resp = self.client.post("/birthboard/api/reminder_seen/", {"type": "other"})
+		self.assertEqual(resp.status_code, 400)
+
+	def test_requires_login(self):
+		"""未登录访问应被重定向。"""
+		self.client.logout()
+		resp = self.client.post("/birthboard/api/reminder_seen/", {"type": "happy"})
+		self.assertEqual(resp.status_code, 302)
+
+	def test_today_reminders_reflect_seen(self):
+		"""标记 seen 后 _get_today_entry_reminders 返回 seen=True。"""
+		from birthboard.models import BirthboardReminderSeen
+		self.assertFalse(bb_views._get_today_entry_reminders(self.user)["seen"]["happy"])
+		now = timezone.localtime(timezone.now()) if timezone.is_aware(timezone.now()) else timezone.now()
+		BirthboardReminderSeen.objects.create(
+			user=self.user, date=now.date(), reminder_type="happy"
+		)
+		self.assertTrue(bb_views._get_today_entry_reminders(self.user)["seen"]["happy"])
