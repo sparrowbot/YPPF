@@ -74,6 +74,8 @@ html {
             --bb-clist-col-gap: 60px;
             --bb-clist-count-size: 44px;
             --bb-clist-line-width: 350px;
+            --bb-clist-tip-font-size: 14px;
+            --bb-clist-tip-bottom: 40px;
         }
         /* 定义你的自定义主题容器类 */
         .select2-container--my-custom-theme {

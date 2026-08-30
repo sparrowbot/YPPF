@@ -459,6 +459,8 @@
           </div>
         </div>
       </div>
+      <!-- 底部小灰字：排名不分先后（固定在整个弹窗最底部，不随名单内容） -->
+      <div style=" font-family: MyfontC; position:fixed; left:50%; transform:translateX(-50%); bottom:var(--bb-clist-tip-bottom,40px); text-align:center; font-size:var(--bb-clist-tip-font-size,14px); color:#000; pointer-events:none;">排名不分先后</div>
     </div>
 
     <script>
@@ -709,6 +711,10 @@
                 document.documentElement.style.setProperty('--bb-clist-num-margin-left', '20px');
                 // 手机版点赞数字垂直偏移（桌面 fallback -10px）
                 document.documentElement.style.setProperty('--bb-clist-count-offset', '-14px');
+                // 手机版底部提示字号（桌面 fallback 14px）
+                document.documentElement.style.setProperty('--bb-clist-tip-font-size', '10px');
+                // 手机版底部提示距屏幕底部距离（桌面 fallback 20px）
+                document.documentElement.style.setProperty('--bb-clist-tip-bottom', '12px');
                 // 手机版页脚：字号与宽度缩小（桌面走 fallback 16px / 480px）
                 document.documentElement.style.setProperty('--bb-footer-font-size', '13px');
                 document.documentElement.style.setProperty('--bb-footer-max-w', '88vw');
