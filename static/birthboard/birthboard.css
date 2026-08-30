@@ -10,34 +10,7 @@ html {
             background: #181818;
             z-index: 0; /* 建立根层叠上下文，让 fixed 弹窗的 z-index 正常比较 */
         }
-        @font-face {
-            font-family: 'MyfontC';
-            src: url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
-            font-weight: 300;
-            /* letter-spacing: 3px; */
-            font-style: normal;
-            unicode-range: U+4E00-9FFF; /* 汉字范围 */
-            display: swap;
-        }
-        @font-face {
-            font-family: 'MyfontE';
-            src: url('fonts/FiraCode-Light.woff2') format('woff2');
-            /* src: local('Courier New'), local('Courier New'), local('Courier'), local('monospace'); */
-            font-weight: 400;
-            font-style: normal;
-            unicode-range: U+0000-007F; 
-            /* letter-spacing: 0;  */
-        }
-        @font-face {
-            font-family: 'Numbers';
-            src: local('Georgia'), url('fonts/georgia.woff') format('woff');
-            /* src: local('Courier New'), local('Courier New'), local('Courier'), local('monospace'); */
-            font-weight: 400;
-            font-style: normal;
-            /* font-size: 40px; */
-            /* color:#9a2d2d; */
-            unicode-range: U+0000-007F; /* 英文和数字范围 */
-        }
+        /* @font-face 声明已抽取到 birthboard_fonts.css，避免与 confirm 页重复下载思源黑体 */
 
         :root {
             --bs-body-font-family: 'MyfontC', 'MyfontE', "Microsoft YaHei", "Arial", sans-serif;
@@ -89,6 +62,18 @@ html {
             --hpbtd-btn-bottom: 10%;
             --hpbtd-btn-width: 4vw;
             --hpbtd-btn-ratio: 193 / 199;
+
+            /* ===== 制作名单弹窗（likeModal）名单排版（手机适配在 JS initPhoneLayers 中覆盖） ===== */
+            --bb-clist-top: 45%;
+            --bb-clist-title-font-size: 22px;
+            --bb-clist-font-size: 20px;
+            --bb-clist-title-mb: 10px;
+            --bb-clist-title-gap: 30px;
+            --bb-clist-line-height: 3.0;
+            --bb-clist-group-gap: 60px;
+            --bb-clist-col-gap: 60px;
+            --bb-clist-count-size: 44px;
+            --bb-clist-line-width: 350px;
         }
         /* 定义你的自定义主题容器类 */
         .select2-container--my-custom-theme {

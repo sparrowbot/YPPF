@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- <title>生日祝福投放</title> -->
+    <link rel="stylesheet" href="{% static 'birthboard/birthboard_fonts.css' %}">
     <link rel="stylesheet" href="{% static 'birthboard/birthboard_confirm.css' %}">
 </head>
 <body>
@@ -123,7 +124,7 @@
             <div class="textN" style="margin-bottom: 1000px;">世界的尽头 哈哈哈 你也可以再往下翻翻看</div>
         {% else %}
             <img src="{{ MEDIA_URL }}birthboard/skt.png" alt="skull" style="width: 50px; margin-top: 100px; margin-bottom: 30px;">
-            <div class="textN">暂无已结束的投放记录</div>
+            <div class="textN" style="margin-bottom: 700px;">暂无已结束的投放记录</div>
         {% endif %}
     {% elif active_tab == 'received' %}
         {% if received_activity_list %}
@@ -382,7 +383,7 @@
         {% else %}
         <div style="margin-bottom: 300px;">
             <img src="{{ MEDIA_URL }}birthboard/blt.png" alt="balloon" style="width: 40px; margin-bottom: 30px;">
-            <div class="textN">暂无待你确认的祝福</div>
+            <div class="textN" style="margin-bottom: 700px;">暂无待你确认的祝福</div>
         </div>
         {% endif %}
     {% else %}
@@ -499,7 +500,7 @@
         {% else %}
         <div style="margin-bottom: 300px;">
             <img src="{{ MEDIA_URL }}birthboard/lob.png" alt="boy" style="width: 40px; margin-top: 100px; margin-bottom: 20px;">
-            <div class="textN">暂无你参与的祝福投放记录</div>
+            <div class="textN" style="margin-bottom: 700px;">暂无你参与的祝福投放记录</div>
         </div>
         {% endif %}
 

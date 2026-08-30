@@ -7,6 +7,8 @@ __all__ = ['CONFIG', 'shihannet']
 class BirthboardConfig(Config):
     # 页脚"联系我们"邮箱：点击通过 mailto 打开系统邮件客户端
     contact_email = LazySetting('contact_email', default='', type=str)
+    # 制作名单：组织列表，每项 {"name": 组织名, "columns": [[姓名...], ...]}
+    contributor_orgs = LazySetting('contributor_orgs', default=[], type=list)
 
 
 CONFIG = BirthboardConfig(ROOT_CONFIG, 'birthboard')

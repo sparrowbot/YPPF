@@ -305,51 +305,8 @@
         }
 
         /* ---- confirm 页卡片样式 ---- */
-        @font-face {
-            font-family: 'MyfontT';
-            src: url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
-            font-weight: 300;
-            font-style: normal;
-            unicode-range: U+4E00-9FFF;
-            display: swap;
-        }
-        @font-face {
-            font-family: 'MyfontTE';
-            src: url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
-            font-weight: 300;
-            font-style: normal;
-            display: swap;
-        }
-        @font-face {
-            font-family: 'MyfontLB';
-            src: url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
-            font-weight: 400;
-            font-style: normal;
-            unicode-range: U+4E00-9FFF;
-            display: swap;
-        }
-        @font-face {
-            font-family: 'MyfontB';
-            src: url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
-            font-weight: 700;
-            font-style: normal;
-            unicode-range: U+4E00-9FFF;
-            display: swap;
-        }
-        @font-face {
-            font-family: 'MyfontE';
-            src: url('fonts/FiraCode-Light.woff2') format('woff2');
-            font-weight: 400;
-            font-style: normal;
-            unicode-range: U+0000-007F;
-        }
-        @font-face {
-            font-family: 'Numbers';
-            src: local('Georgia');
-            font-weight: 400;
-            font-style: normal;
-            unicode-range: U+0000-007F;
-        }
+        /* @font-face 声明已统一到 birthboard_fonts.css（页面 head 引入），
+           避免与主页面/确认页重复下载思源黑体与 FiraCode */
         .boardcard {
             margin-bottom: 100px;
             display: flex;

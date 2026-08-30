@@ -699,3 +699,20 @@ class BirthboardReminderSeenTests(TestCase):
 			user=self.user, date=now.date(), reminder_type="happy"
 		)
 		self.assertTrue(bb_views._get_today_entry_reminders(self.user)["seen"]["happy"])
+
+
+class ContributorOrgsConfigTests(TestCase):
+	"""制作名单配置（birthboard.contributor_orgs）的结构校验。"""
+
+	def test_contributor_orgs_config_structure(self):
+		from birthboard.config import CONFIG
+		orgs = CONFIG.contributor_orgs
+		self.assertIsInstance(orgs, list)
+		self.assertTrue(orgs, "contributor_orgs 不应为空，至少包含一个组织")
+		for org in orgs:
+			self.assertIsInstance(org["name"], str)
+			self.assertTrue(org["name"])
+			self.assertIsInstance(org["columns"], list)
+			for col in org["columns"]:
+				self.assertIsInstance(col, list)
+				self.assertTrue(all(isinstance(name, str) and name for name in col))

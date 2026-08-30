@@ -22,6 +22,8 @@
       rel="stylesheet"
       href="{% static 'Appointment/assets/select2/css/select2.min.css' %}"
     />
+    <!-- 共享字体声明：思源黑体等 @font-face 只声明一次，避免两个 CSS 各自下载 -->
+    <link rel="stylesheet" href="{% static 'birthboard/birthboard_fonts.css' %}">
     <link rel="stylesheet" href="{% static 'birthboard/birthboard.css' %}">
   </head>
 
@@ -426,32 +428,35 @@
     </div>
 
     <!-- 制作名单点赞弹窗（先用现有弹窗图占位，中间只读计数器，图片内按钮点击 +1，点弹窗外部关闭） -->
-    <div id="likeModal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); animation: bb-fade-in 3s ease;">
-      <div style="position:relative; display:inline-block; margin:var(--popup-margin-top) auto; left:50%; transform:translateX(-50%);">
-        <img class="bb-reminder-back hpbtd-size" src="{{ MEDIA_URL }}birthboard/contributor/contributorback.png" style="display:block;">
-        <!-- 制作名单：两个机构分组 + 人员名单 -->
-        <div id="contributor-list" style="position:absolute; left:50%; top:42%; transform:translate(-50%,-50%); width:82%; text-align:left; font-family:'MyfontC','MyfontE','Microsoft YaHei','Arial',sans-serif; color:#000000; pointer-events:none;">
-          <div style="display:flex; align-items:flex-start; gap:7vw;">
-            <div>
-              <div style="font-size:22px; font-weight:bold; margin-bottom:10px;">叁拾伍圆设计实验室</div>
-              <div style="margin-top:30px; display:flex; font-size:22px; gap:2vw;">
-                <div style="line-height:2.3;">黄柯翰<br>郑申越<br>冯品嘉<br>陈双本<br>朱颖诺</div>
-                <div style="line-height:2.3;">李明彦<br>李佳镁<br>汤家乐<br>刘&emsp;传<br>景璧辉</div>
-              </div>
-            </div>
-            <div>
-              <div style="font-size:22px; font-weight:bold; margin-bottom:10px;">智慧书院</div>
-              <div style="margin-top:30px; font-size:22px; line-height:2.3;">袁纳海<br>张庭瑞<br>高志远<br>唐明川</div>
+    <div id="likeModal" class="fullscreen-overlay" style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100vw; height:100vh; background:rgb(237, 225, 164); animation: bb-fade-in 3s ease;">
+      <!-- 制作名单：直接相对视口居中（fixed），缩放窗口时保持居中不移动、内容不换行 -->
+      <div id="contributor-list" style="position:fixed; left:50%; top:var(--bb-clist-top); transform:translate(-50%,-50%); text-align:left; white-space:nowrap; font-family:'MyfontC','MyfontE','Microsoft YaHei','Arial',sans-serif; color:#000000; pointer-events:none;">
+        <!-- 名单内部数值走 CSS 变量：桌面默认在 birthboard.css :root，手机在 initPhoneLayers() 覆盖 -->
+        <div style="display:flex; align-items:flex-start; gap:var(--bb-clist-group-gap,60px);">
+          {% for org in contributor_orgs %}
+          <div>
+            <div style="font-size:var(--bb-clist-title-font-size,22px); margin-bottom:var(--bb-clist-title-mb,10px);">{{ org.name }}</div>
+            <div style="margin-top:var(--bb-clist-title-gap,30px); display:flex; font-size:var(--bb-clist-font-size,20px); gap:var(--bb-clist-col-gap,60px);">
+              {% for col in org.columns %}
+              <div style="line-height:var(--bb-clist-line-height,3.0);">{% for name in col %}{{ name }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>
+              {% endfor %}
             </div>
           </div>
+          {% endfor %}
         </div>
-        <div style="position:absolute; left:8%; bottom:var(--hpbtd-btn-bottom); display:flex; align-items:center; gap:1.2vw;">
+        <!-- 点赞区域：作为名单的子元素随名单定位 -->
+        <div style="margin-top:40px; display:flex; align-items:center; gap:18px; pointer-events:none;">
           <button type="button" id="like-btn" class="bb-reminder-btn hpbtd-size" onclick="likePlus(event)" title="点赞" style="
-            position:static; left:auto; bottom:auto; transform:none;
+            position:static; left:auto; bottom:auto; transform:none; pointer-events:auto;
+            width:var(--bb-clist-btn-width,56px); height:auto;
             background:url('{{ MEDIA_URL }}birthboard/contributor/contributorbuttom1.png') no-repeat center/100% 100%;
             border:none; cursor:pointer;
           "></button>
-          <div id="like-count" style="margin-left:2vw; transform:translateY(-3px); font-family:'Numbers','MyfontC'; font-size:44px; color:rgb(255, 166, 0); -webkit-text-stroke:1px rgb(0, 0, 0); line-height:1; pointer-events:none; white-space:nowrap;">0</div>
+          <!-- line.png 放在 like-count 外面：likePlus 会用 textContent 刷新数字，会清空 like-count 内部节点 -->
+          <div style="margin-left:var(--bb-clist-num-margin-left,50px); display:flex; flex-direction:column; align-items:center;">
+            <div id="like-count" style="align-self:flex-start; transform:translateY(var(--bb-clist-count-offset,-10px)); font-family:'Numbers','MyfontC'; font-size:var(--bb-clist-count-size,44px); color:rgb(255, 166, 0); -webkit-text-stroke:1px rgb(0, 0, 0); line-height:1; pointer-events:none; white-space:nowrap; z-index: 100;">0</div>
+            <img src="{{ MEDIA_URL }}birthboard/contributor/line.png" alt="" style="display:block; width:var(--bb-clist-line-width,350px); height:auto; margin-top:-19px; pointer-events:none; transform:translateX(-10px);">
+          </div>
         </div>
       </div>
     </div>
@@ -546,8 +551,10 @@
       (function () {
         var section = document.getElementById('confirm-section');
 
-        // 遮罩隐藏延时定时器：鼠标移开后延迟 0.5s 再隐藏，等抽屉收回动画结束
+        // 遮罩隐藏延时定时器：卡片收回动画结束后再隐藏遮罩
         var maskHideTimer = null;
+        // 卡片收回延时定时器：鼠标移开后延迟 1s 再让卡片缩回
+        var tipHideTimer = null;
 
         var tip = document.createElement('div');
         tip.className = 'bb-footer-tip';
@@ -555,6 +562,13 @@
         tipImg.src = '{{ MEDIA_URL }}birthboard/logoone.png';
         tipImg.alt = '';
         tip.appendChild(tipImg);
+        // 点击 logo 图片时弹出浏览器原生提示（tip 默认 pointer-events:none，需让图片可点击）
+        tipImg.style.pointerEvents = 'auto';
+        tipImg.style.cursor = 'pointer';
+        tipImg.addEventListener('click', function (e) {
+          e.stopPropagation();
+          alert('啊呀被抓到了');
+        });
 
         // 三个按钮各自对应的 logo：用户协议 → one，制作名单 → two，联系我们 → three
         var tipImgs = [
@@ -573,8 +587,9 @@
         var btns = section.querySelectorAll('.downbtn');
         btns.forEach(function (btn, index) {
           btn.addEventListener('mouseenter', function () {
-            // 如果之前有未执行的遮罩隐藏延时，先取消，避免移出后又隐藏
+            // 如果之前有未执行的收回/隐藏延时，先取消，避免移出后又隐藏
             clearTimeout(maskHideTimer);
+            clearTimeout(tipHideTimer);
 
             var r = btn.getBoundingClientRect();
             var tipH = tip.offsetHeight;
@@ -592,12 +607,15 @@
             mask.style.display = 'block';
           });
           btn.addEventListener('mouseleave', function () {
-            tip.classList.remove('visible');
-            // 遮罩延时 0.5s 再隐藏，等抽屉收回动画完全结束
+            // 延迟 0.1s 后再让卡片缩回，随后遮罩延时 0.5s 隐藏
+            clearTimeout(tipHideTimer);
             clearTimeout(maskHideTimer);
-            maskHideTimer = setTimeout(function () {
-              mask.style.display = 'none';
-            }, 500);
+            tipHideTimer = setTimeout(function () {
+              tip.classList.remove('visible');
+              maskHideTimer = setTimeout(function () {
+                mask.style.display = 'none';
+              }, 500);
+            }, 100);
           });
         });
       })();
@@ -608,7 +626,7 @@
 
         let ticking = false;
         // UA检测是否为手机设备（软键盘不影响），用于切换手机版静态图层
-        var _isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent);
+        var _isMobileUA = /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent);
         var _isiPhone = /iPhone/i.test(navigator.userAgent);
         var _isPhoneMode = _isMobileUA;
 
@@ -673,6 +691,24 @@
                 document.documentElement.style.setProperty('--hpbtd-btn-left', '90%');
                 document.documentElement.style.setProperty('--hpbtd-btn-bottom', '10%');
                 document.documentElement.style.setProperty('--hpbtd-btn-width', '8vw');
+                // 手机版制作名单弹窗：名单字号/行距/间距/点赞数字缩小（在此修改数值）
+                document.documentElement.style.setProperty('--bb-clist-top', '50%');
+                document.documentElement.style.setProperty('--bb-clist-title-font-size', '12px');
+                document.documentElement.style.setProperty('--bb-clist-font-size', '12px');
+                document.documentElement.style.setProperty('--bb-clist-title-mb', '5px');
+                document.documentElement.style.setProperty('--bb-clist-title-gap', '20px');
+                document.documentElement.style.setProperty('--bb-clist-line-height', '1.9');
+                document.documentElement.style.setProperty('--bb-clist-group-gap', '20px');
+                document.documentElement.style.setProperty('--bb-clist-col-gap', '20px');
+                document.documentElement.style.setProperty('--bb-clist-count-size', '26px');
+                // 手机版 line.png 横线宽度（桌面 fallback 350px）
+                document.documentElement.style.setProperty('--bb-clist-line-width', '150px');
+                // 手机版点赞按钮宽度（桌面 fallback 56px）
+                document.documentElement.style.setProperty('--bb-clist-btn-width', '30px');
+                // 手机版数字+线包裹 div 左边距（桌面 fallback 50px）
+                document.documentElement.style.setProperty('--bb-clist-num-margin-left', '20px');
+                // 手机版点赞数字垂直偏移（桌面 fallback -10px）
+                document.documentElement.style.setProperty('--bb-clist-count-offset', '-14px');
                 // 手机版页脚：字号与宽度缩小（桌面走 fallback 16px / 480px）
                 document.documentElement.style.setProperty('--bb-footer-font-size', '13px');
                 document.documentElement.style.setProperty('--bb-footer-max-w', '88vw');
@@ -1092,6 +1128,9 @@
               
               // 等滚动动画完成后再重置表单
               setTimeout(function() {
+                  // 重新启用提交时被禁用的 receiver/senders，允许同一页面再次提交
+                  $('#receiver').prop('disabled', false);
+                  $('#senders').prop('disabled', false);
                   $('#receiver').val(null).trigger('change');
                   $('#mode').val('0').trigger('change');
                   // date: 清空显示值、隐藏值和日历选中
@@ -1195,10 +1234,13 @@
               // console.log('[DEBUG] file input after replace:', $("#image")[0].files[0] ? $("#image")[0].files[0].name : 'none');
               _resizedImageBlob = null;
           }
-          // console.log('[DEBUG] about to call form.submit(), pendingSubmit=true');
           pendingSubmit = true;
           _formSubmitted = true;
-          $("#birthboard-form")[0].submit();
+          // 必须触发 submit 事件而非原生 form.submit()：原生提交会绕过提交处理器，
+          // 不会禁用 receiver/senders，导致 select2 的用户名值也被提交，
+          // 与隐藏的 pk input 混合后后端表单校验失败、不生成记录。
+          // 触发事件后处理器会第二次运行并进入"禁用控件 → 真正提交"分支。
+          $("#birthboard-form").trigger("submit");
         });
         function showInsufficientBalanceModal(balance) {
           $("#insufficient-balance-text").html(
@@ -2307,8 +2349,11 @@
               '<input type="hidden" name="senders" value="' + pk + '" />',
             ).appendTo("#birthboard-form");
           });
-          // select2控件的选中值也同步为pk
-          $("#senders").val(senderPks.map(String));
+          // 注意：不要把 #senders 的选中值同步为 pk。若在校验通过前修改其值，
+          // 一旦本次提交因漏填/图片不合格等被拦截，用户修正后再次提交时
+          // $("#senders").val() 已变成 pk 数组，导致邀请人解析不到而只剩本人。
+          // 真正提交时 #senders 会被禁用（disabled 不参与提交），
+          // 名单完全由上面的隐藏 input 携带，因此无需同步。
           // 打印所有隐藏input
           let debugInputs = [];
           $("input[name='senders'][type='hidden']").each(function () {

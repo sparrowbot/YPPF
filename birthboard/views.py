@@ -59,7 +59,7 @@ from birthboard.reminder import (
 )
 from playwright.sync_api import sync_playwright
 
-from birthboard.config import shihannet
+from birthboard.config import CONFIG, shihannet
 
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
 logger = logging.getLogger(__name__)
@@ -547,6 +547,11 @@ def birthboard(request):
     birthboard_date_rule = _get_birthboard_date_rule()
     birthboard_date_rule_json = _serialize_birthboard_date_rule(birthboard_date_rule)
 
+    # 页脚"联系我们"邮箱（配置 birthboard.contact_email）
+    contact_email = CONFIG.contact_email
+    # 制作名单：组织与姓名（配置 birthboard.contributor_orgs）
+    contributor_orgs = CONFIG.contributor_orgs
+
     initial = request.session.pop('birthboard_resubmit_initial', None)
 
     if request.method == "POST":
@@ -570,6 +575,8 @@ def birthboard(request):
                     "form": form,
                     "users": users,
                     "json_context": json_context,
+                    "contact_email": contact_email,
+                    "contributor_orgs": contributor_orgs,
                     "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user),
                     "today_entry_reminders": today_entry_reminders,
                     "birthboard_date_rule": birthboard_date_rule_json,
@@ -579,7 +586,7 @@ def birthboard(request):
             if width != 1920 or height != 1080:
                 messages.error(request, "图片不符合要求，需1920x1080")
                 current_user_id = str(request.user.username)
-                return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "current_user_id": current_user_id, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
+                return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "current_user_id": current_user_id, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
             # 校验送出者元气值：按提交人数计算人均价，避免误按总价校验
             posted_sender_ids = set(request.POST.getlist('senders'))
             sender_count = max(len(posted_sender_ids), len(senders), 1)
@@ -592,6 +599,8 @@ def birthboard(request):
                     "form": form,
                     "users": users,
                     "json_context": json_context,
+                    "contact_email": contact_email,
+                    "contributor_orgs": contributor_orgs,
                     "insufficient_balance": current_balance,
                     "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user),
                     "today_entry_reminders": today_entry_reminders,
@@ -677,10 +686,10 @@ def birthboard(request):
                     notify_invite_sender(record, sender, initiator_name, per)
             except Exception as e:
                 messages.error(request, f"记录创建失败：{e}")
-                return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
+                return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
             return redirect("birthboard_confirm")
         else:
-            return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
+            return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
     else:
         if initial:
             form = BirthboardForm(initial=initial)
@@ -690,6 +699,8 @@ def birthboard(request):
             "form": form,
             "users": users,
             "json_context": json_context,
+            "contact_email": contact_email,
+            "contributor_orgs": contributor_orgs,
             "birthboard_initial": json.dumps(initial) if initial else None,
             "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user),
             "today_entry_reminders": today_entry_reminders,
