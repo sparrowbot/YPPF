@@ -130,6 +130,7 @@
     },
     "birthboard": {
         "contact_email": "$BIRTHBOARD_CONTACT_EMAIL$",
+        "template_download_url": "https://www.bilibili.com/video/BV1GJ411x7h7/?spm_id_from=333.337.search-card.all.click",
         "contributor_orgs": [
             {
                 "name": "叁拾伍圆设计实验室",

@@ -127,6 +127,7 @@
                     <img class="image-preview" src="{{ MEDIA_URL }}birthboard/replace.png" alt="预览"/>
                     <img class="image-preview" src="{{ MEDIA_URL }}birthboard/replace.png" alt="预览"/>
                 </div>
+                {% if template_download_url %}<a id="template-download-link" class="invalid-feedback" href="{{ template_download_url }}" target="_blank" rel="noopener" style="display: block; margin-top: 105px; cursor: pointer; text-decoration: none;">模版下载</a>{% endif %}
                 <div
                     class="invalid-feedback"
                     id="image-error"
@@ -157,7 +158,7 @@
     </main>
 
     <!-- 查看确认页面按钮（移出 form，避免层叠上下文限制） -->
-    <a href="/welcome/" id="desktop-exit-btn" style="position:fixed; left:12px; top:14%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:1; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(-2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
+    <a href="/welcome/" id="desktop-exit-btn" data-bb-exit style="position:fixed; left:12px; top:14%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:1; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(-2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
         <img src="{{ MEDIA_URL }}birthboard/button/exitleft.webp" alt="返回首页" style="display:block; border:none; cursor:pointer; max-width: 7vw;">
     </a>
     <a href="javascript:void(0)" id="desktop-confirm-count-link" onclick="document.getElementById('confirm-section').scrollIntoView({behavior:'smooth'});" style="position:fixed; left:16px; top:30%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:1; text-decoration:none; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(-2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
@@ -172,7 +173,7 @@
 
 <!-- 手机版手机版手机版手机版手机版手机版手机版 -->
 
-    <a href="/welcome/" id="phone-exit-btn" style="display:none; position:fixed; left:12px; top:14%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:9999; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
+    <a href="/welcome/" id="phone-exit-btn" data-bb-exit style="display:none; position:fixed; left:12px; top:14%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:9999; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
         <img src="{{ MEDIA_URL }}birthboard/button/exitright.webp" alt="返回首页" style="display:block; border:none; cursor:pointer; max-width: 7vw;">
     </a>
     <a href="javascript:void(0)" id="phone-confirm-count-link" onclick="document.getElementById('confirm-section').scrollIntoView({behavior:'smooth'});" style="display:none; position:fixed; left:16px; top:30%; transform:translateY(-50%) scale(var(--form-scale,1)); transform-origin:left center; z-index:9999; text-decoration:none; transition: transform 0.15s ease;" onmouseover="this.style.transform='translateY(-50%) translateX(2%) scale(var(--form-scale,1))'" onmouseout="this.style.transform='translateY(-50%) scale(var(--form-scale,1))'">
@@ -653,7 +654,16 @@
                 document.getElementById('phone-layer-tree').style.display = 'block';
                 document.getElementById('phone-layer-lines').style.display = 'block';
                 document.getElementById('phone-layer-lines2').style.display = 'block';
-                document.querySelector('a[href="/birthboard/approve/"]').style.display = 'none';
+                // 审核管理入口：手机版保留（放大点击区域，保持透明不遮挡画面）
+                var _approveLink = document.querySelector('a[href="/birthboard/approve/"]');
+                if (_approveLink) {
+                    _approveLink.style.display = 'block';
+                    _approveLink.style.top = '1180px';
+                    _approveLink.style.right = '430px';
+                    _approveLink.style.width = '80px';
+                    _approveLink.style.height = '80px';
+                    _approveLink.style.background = 'transparent';
+                }
                 document.documentElement.style.setProperty('--bs-body-font-size', '84px');
                 document.documentElement.style.setProperty('--bs-sup-font-size', '48px');
                 // 手机版表单定位（在此修改数值）
@@ -675,6 +685,12 @@
                 document.documentElement.style.setProperty('--pos-img-gap', '30px');
                 document.getElementById('image-error').style.marginTop = '110px';
                 document.getElementById('image-error').style.marginLeft = '950px';
+                // 模版下载链接与 image-error 同槽位，手机端同步其位置
+                var _templateLink = document.getElementById('template-download-link');
+                if (_templateLink) {
+                    _templateLink.style.marginTop = '110px';
+                    _templateLink.style.marginLeft = '950px';
+                }
                 document.documentElement.style.setProperty('--pos-anonymous-top', '9520px');
                 document.documentElement.style.setProperty('--pos-anonymous-left', '400px');
                 document.documentElement.style.setProperty('--pos-submit-top', '10385px');
@@ -744,7 +760,6 @@
             // console.log('实际渲染字体:', computedFont);
             // 如果宽高比大于 4:3，调整宽度
             if (window.innerWidth < 600){
-                document.querySelector('a[href="/birthboard/approve/"]').style.display = 'none';
                 document.querySelector('#next-page-btn').style.display = 'none';
                 document.querySelector('#phone-exit-btn img').style.maxWidth = '140px';
                 document.querySelector('#phone-confirm-count-link img').style.maxWidth = '140px';
@@ -2640,6 +2655,35 @@
       document.getElementById('confirm-fullscreen-modal').addEventListener('click', function(e) {
           if (e.target === this) this.style.display = 'none';
       });
+    </script>
+
+    <!-- 小程序 webview 适配：退出按钮在小程序内返回小程序（普通浏览器行为不变） -->
+    <script src="{% static 'birthboard/birthboard_webview.js' %}"></script>
+
+    <script>
+        // 模版下载链接与图片错误提示联动：error 有内容时隐藏链接，否则显示链接
+        (function () {
+            var link = document.getElementById('template-download-link');
+            var error = document.getElementById('image-error');
+            if (!link || !error) return;
+
+            function sync() {
+                var hasError = error.style.display !== 'none'
+                    && error.textContent.trim().length > 0;
+                link.style.display = hasError ? 'none' : 'block';
+            }
+            sync();
+
+            if (window.MutationObserver) {
+                new MutationObserver(sync).observe(error, {
+                    attributes: true,
+                    attributeFilter: ['style'],
+                    childList: true,
+                    characterData: true,
+                    subtree: true,
+                });
+            }
+        })();
     </script>
   </body>
 </html>

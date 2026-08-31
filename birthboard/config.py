@@ -9,6 +9,12 @@ class BirthboardConfig(Config):
     contact_email = LazySetting('contact_email', default='', type=str)
     # 制作名单：组织列表，每项 {"name": 组织名, "columns": [[姓名...], ...]}
     contributor_orgs = LazySetting('contributor_orgs', default=[], type=list)
+    # 海报"模版下载"链接：投放页图片上传区展示的可点击下载地址
+    template_download_url = LazySetting(
+        'template_download_url',
+        default='https://www.bilibili.com/video/BV1GJ411x7h7/?spm_id_from=333.337.search-card.all.click',
+        type=str,
+    )
 
 
 CONFIG = BirthboardConfig(ROOT_CONFIG, 'birthboard')

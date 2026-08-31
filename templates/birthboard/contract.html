@@ -163,7 +163,7 @@
       
     </div>
     <div style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);">
-        <a href="/welcome/" style="color: #888; text-decoration: none; font-size: 14px; text-align: center; ">返回首页</a>
+        <a href="/welcome/" data-bb-exit style="color: #888; text-decoration: none; font-size: 14px; text-align: center; ">返回首页</a>
     </div>
 
     <script src="{% static 'Appointment/assets/js/jquery.min.js' %}"></script>
@@ -205,5 +205,8 @@
         });
       });
     </script>
+
+    <!-- 小程序 webview 适配：返回首页在小程序内改为返回小程序（普通浏览器行为不变） -->
+    <script src="{% static 'birthboard/birthboard_webview.js' %}"></script>
   </body>
 </html>

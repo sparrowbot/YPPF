@@ -153,7 +153,10 @@
 <body>
 
 <div class="topbar">
-    <h1>生日祝福投放审核</h1>
+    <div style="display:flex;align-items:center;gap:10px;">
+        <a href="{% url 'birthboard' %}" style="color:#fff;text-decoration:none;font-size:14px;background:rgba(255,255,255,.15);padding:4px 10px;border-radius:12px;white-space:nowrap;">‹ 返回</a>
+        <h1>生日祝福投放审核</h1>
+    </div>
     <div style="display:flex;gap:8px;align-items:center;">
         <button type="button" id="standardBtn" style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:4px 10px;border-radius:12px;font-size:12px;">审核标准</button>
         <span class="role-badge">{% if is_first and not is_second %}一审{% elif is_second and not is_first %}终审{% else %}审核{% endif %}</span>
