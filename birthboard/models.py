@@ -186,7 +186,7 @@ class BirthboardConfirmSeen(models.Model):
         """标记用户某tab为已读（设为当前时间）"""
         obj, _ = cls.objects.get_or_create(user=user)
         setattr(obj, f'{tab}_seen', datetime.now())
-        obj.save()
+        obj.save(update_fields=[f'{tab}_seen'])
 
 # 工具函数：录入指定用户为审核员（可用于shell或临时脚本）
 def add_birthboard_approver_by_username(username):

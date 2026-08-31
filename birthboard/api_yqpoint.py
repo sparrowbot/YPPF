@@ -5,8 +5,8 @@ from app.models import User
 from birthboard.models import BirthboardRecord
 from birthboard.utils import calculate_per_cost
 
-@require_POST
 @login_required
+@require_POST
 def check_yqpoint(request):
     """
     前端传递 senders（用户名列表）和 record_id 或 mode，返回每个用户当前余额和是否足够。

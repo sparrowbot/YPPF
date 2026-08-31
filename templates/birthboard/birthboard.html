@@ -521,7 +521,10 @@
         // 每次点击随机切换按钮图标
         randomContributorButton();
         // 后台 +1，用返回的最新值更新显示
-        fetch('/birthboard/api/like_add/', { method: 'POST' })
+        fetch('/birthboard/api/like_add/', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+        })
           .then(function (r) { return r.json(); })
           .then(function (d) {
             likeCount = d.count || (likeCount + 1);
@@ -1041,19 +1044,6 @@
           // console.log('[birthboard] iframe loaded, refreshing count');
           refreshConfirmCount();
       });
-
-      // 匿名开关
-      function toggleAnon() {
-          var $toggle = $('#anon-toggle');
-          var $cb = $('#is_anonymous');
-          if ($toggle.hasClass('right')) {
-              $toggle.removeClass('right');
-              $cb.prop('checked', false);
-          } else {
-              $toggle.addClass('right');
-              $cb.prop('checked', true);
-          }
-      }
 
         function getNextPageTargetY() {
           var currentY = window.scrollY || window.pageYOffset || 0;

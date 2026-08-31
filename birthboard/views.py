@@ -11,8 +11,8 @@ from django.contrib import messages
 
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_protect
+from django.contrib.auth.decorators import login_required
 
-from app.views_dependency import *
 from birthboard.models import (
     BirthboardRecord,
     ChangeRecord,
@@ -37,7 +37,7 @@ User = get_user_model()
 
 # 审核员ID白名单
 
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from functools import wraps
 
@@ -442,6 +442,7 @@ def birthboard_contract(request):
     )
 
 
+@csrf_protect
 @login_required(redirect_field_name="origin")
 @require_http_methods(["POST"])
 def birthboard_sign_contract(request):
@@ -461,6 +462,7 @@ def birthboard_like_count(request):
     return JsonResponse({"count": like.count})
 
 
+@csrf_protect
 @login_required(redirect_field_name="origin")
 @require_http_methods(["POST"])
 def birthboard_like_add(request):
@@ -533,6 +535,7 @@ def _generate_birthboard_image_filename(image, date, submit_time=None) -> str:
     return f'{base_prefix}_{counter}{file_ext}'
 
 
+@csrf_protect
 @login_required(redirect_field_name="origin")
 @require_contract
 @require_http_methods(["GET", "POST"])

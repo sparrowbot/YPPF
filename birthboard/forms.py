@@ -11,6 +11,6 @@ class BirthboardForm(forms.Form):
     mode = forms.ChoiceField(label="投放模式", choices=[
         (0, '35元气值/1天'),
         (1, '60元气值/3天'),
-        (2, '1000元气值/1年'),
+        (2, '10000元气值/1年'),
     ], required=True)
     is_anonymous = forms.BooleanField(label="匿名", required=False)
