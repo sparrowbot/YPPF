@@ -436,6 +436,19 @@ class LockUiIntegrationTests(TestCase):
 		content = resp.content.decode('utf-8')
 		self.assertIn('无需燕牌 暂德清闲', content)
 
+	def test_approve_page_mobile_renders_for_mobile_ua(self):
+		# 移动端 UA 渲染手机版审核页，且功能元素齐全
+		self.client.login(username="approver", password="test")
+		resp = self.client.get(
+			reverse('birthboard_approve'),
+			HTTP_USER_AGENT='Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+		)
+		self.assertEqual(resp.status_code, 200)
+		content = resp.content.decode('utf-8')
+		self.assertIn('viewport', content)  # 移动模板特征
+		self.assertIn('审核标准', content)
+		self.assertIn('全部投放', content)
+
 
 class BirthboardNightlySimulationCommandTests(TestCase):
 	@patch("birthboard.jobs.birthboard_nightly_update_2345")

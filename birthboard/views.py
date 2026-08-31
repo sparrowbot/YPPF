@@ -1359,6 +1359,16 @@ def _get_next_birthboard_approval_activity(current_user, is_first: bool, is_seco
             }
     return None
 
+
+def _is_mobile_request(request):
+    """根据 User-Agent 判断是否为移动端（手机/微信内置浏览器）请求。"""
+    ua = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    mobile_keywords = (
+        'android', 'iphone', 'ipad', 'ipod', 'mobile', 'micromessenger',
+    )
+    return any(keyword in ua for keyword in mobile_keywords)
+
+
 @csrf_protect
 @login_required(redirect_field_name="origin")
 @check_user_access(redirect_url="/logout/")
@@ -1491,7 +1501,12 @@ def birthboard_approve(request):
     current_activity = _get_next_birthboard_approval_activity(request.user, is_first, is_second)
     activity_list = _build_approval_activity_list(request.user, is_first, is_second)
 
-    return render(request, "birthboard/birthboard_approve.html", {
+    template_name = (
+        "birthboard/birthboard_approve_mobile.html"
+        if _is_mobile_request(request)
+        else "birthboard/birthboard_approve.html"
+    )
+    return render(request, template_name, {
         "current_activity": current_activity,
         "activity_list": activity_list,
         "message": message,
