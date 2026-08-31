@@ -23,6 +23,12 @@ from birthboard.notify import (
 
 logger = bb_get_logger(__name__)
 
+__all__ = [
+    'birthboard_waiting_remind_and_autoreject',
+    'birthboard_nightly_update_2345',
+    'birthboard_auto_terminate_stale_waiting',
+]
+
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
 
 
@@ -74,12 +80,12 @@ def _get_mode_duration_days(record: BirthboardRecord) -> int:
             if mode in mapping:
                 return mapping[mode]
             # sometimes mode stores actual cost
-            cost_map = {35: 1, 60: 3, 1000: 365}
+            cost_map = {35: 1, 60: 3, 10000: 365}
             if mode in cost_map:
                 return cost_map[mode]
         if isinstance(mode, str) and mode.isdigit():
             m = int(mode)
-            cost_map = {35: 1, 60: 3, 1000: 365}
+            cost_map = {35: 1, 60: 3, 10000: 365}
             return cost_map.get(m, 1)
     except Exception:
         logger.exception("[birthboard.jobs] _get_mode_duration_days: failed to deduce duration, default to 1")
@@ -88,7 +94,7 @@ def _get_mode_duration_days(record: BirthboardRecord) -> int:
 
 def _today_local_date():
     # logger.debug("[birthboard.jobs] _today_local_date: start")
-    now = timezone.now()
+    now = datetime.now()
     # now = timezone.make_aware(datetime(2026, 4, 24, 12, 0))
     is_aware = timezone.is_aware(now)
     today = timezone.localtime(now).date() if is_aware else now.date()
@@ -349,6 +355,8 @@ def birthboard_nightly_update_2345():
 
     to_start = []
     to_stop = []
+    start_records = []
+    stop_records = []
 
     # Acquire lock (cache key) to notify views
     _set_update_lock(True)
@@ -383,6 +391,7 @@ def birthboard_nightly_update_2345():
                 img_path = _get_abs_image_path(rec.image)
                 if img_path:
                     to_start.append(img_path)
+                start_records.append(rec)
 
             # STOP: ONGOING -> FINISHED when end_date == target_date
             ongoing_qs = list(
@@ -410,6 +419,7 @@ def birthboard_nightly_update_2345():
                     img_path = _get_abs_image_path(rec.image)
                     if img_path:
                         to_stop.append(img_path)
+                    stop_records.append(rec)
                 elif dur > 1 and end_date - timedelta(days=1) == target_date:
                     transaction.on_commit(lambda rec=rec, end_date=end_date: notify_broadcast_ending_soon(rec, end_date))
 
@@ -457,6 +467,18 @@ def birthboard_nightly_update_2345():
                             pass
         except Exception:
             logger.exception("[birthboard.jobs] nightly_update_2345: update_list loop failed")
+            outcome = None
+
+        if outcome is None or not outcome.ok:
+            # 屏幕更新失败：回退本次已推进的记录状态，让下个任务周期重新尝试，
+            # 避免数据库与外部屏幕永久不一致。
+            logger.error(
+                "[birthboard.jobs] nightly_update_2345: display update failed, reverting transitions "
+                "to_start=%s to_stop=%s",
+                len(to_start),
+                len(to_stop),
+            )
+            _revert_nightly_transitions(start_records, stop_records, target_date)
 
         logger.info(
             "[birthboard.jobs] nightly_update_2345: finished to_start=%s to_stop=%s",
@@ -556,6 +578,53 @@ def birthboard_nightly_update_2345():
 #     finally:
 #         _set_update_lock(False)
 
+def _revert_nightly_transitions(
+    start_records: list, stop_records: list, target_date
+):
+    """屏幕更新失败后回退夜间已推进的状态，保证下个任务周期可重试。
+
+    - READY->ONGOING 的记录回退为 READY
+    - ONGOING->FINISHED 的记录回退为 ONGOING
+    仅回退当前仍处于推进后状态的记录，避免覆盖并发产生的其它状态变化。
+    """
+    for rec in start_records:
+        with transaction.atomic():
+            refreshed = (
+                BirthboardRecord.objects.select_for_update()
+                .filter(pk=rec.pk, status=BirthboardRecord.Status.ONGOING)
+                .first()
+            )
+            if refreshed is None:
+                continue
+            refreshed.status = BirthboardRecord.Status.READY
+            refreshed.save(update_fields=["status"])
+            ChangeRecord.log(
+                record=refreshed,
+                actor=None,
+                action=ChangeRecord.Action.UPDATE,
+                before_status=BirthboardRecord.Status.ONGOING,
+                after_status=BirthboardRecord.Status.READY,
+                detail={"scope": "nightly_revert_start", "date": str(target_date)},
+            )
+    for rec in stop_records:
+        with transaction.atomic():
+            refreshed = (
+                BirthboardRecord.objects.select_for_update()
+                .filter(pk=rec.pk, status=BirthboardRecord.Status.FINISHED)
+                .first()
+            )
+            if refreshed is None:
+                continue
+            refreshed.status = BirthboardRecord.Status.ONGOING
+            refreshed.save(update_fields=["status"])
+            ChangeRecord.log(
+                record=refreshed,
+                actor=None,
+                action=ChangeRecord.Action.UPDATE,
+                before_status=BirthboardRecord.Status.FINISHED,
+                after_status=BirthboardRecord.Status.ONGOING,
+                detail={"scope": "nightly_revert_stop", "date": str(target_date)},
+            )
 
 @periodical(
     "cron",

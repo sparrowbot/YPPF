@@ -13,7 +13,7 @@
     font-weight: 300;
     font-style: normal;
     unicode-range: U+4E00-9FFF; /* 汉字范围 */
-    display: swap;
+    font-display: swap;
 }
 @font-face {
     font-family: 'MyfontT';
@@ -22,7 +22,7 @@
     font-weight: 300;
     font-style: normal;
     unicode-range: U+4E00-9FFF; /* 汉字范围 */
-    display: swap;
+    font-display: swap;
 }
 @font-face {
     font-family: 'MyfontTE';
@@ -30,7 +30,7 @@
          url('fonts/SourceHanSansSC-VF.otf.woff2') format('woff2');
     font-weight: 300;
     font-style: normal;
-    display: swap;
+    font-display: swap;
 }
 @font-face {
     font-family: 'MyfontLB';
@@ -39,7 +39,7 @@
     font-weight: 400;
     font-style: normal;
     unicode-range: U+4E00-9FFF; /* 汉字范围 */
-    display: swap;
+    font-display: swap;
 }
 @font-face {
     font-family: 'MyfontB';
@@ -48,7 +48,7 @@
     font-weight: 700;
     font-style: normal;
     unicode-range: U+4E00-9FFF; /* 汉字范围 */
-    display: swap;
+    font-display: swap;
 }
 @font-face {
     font-family: 'MyfontE';

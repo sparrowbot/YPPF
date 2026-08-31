@@ -34,7 +34,7 @@ class BirthboardRecord(models.Model):
         ONGOING = 'ongoing', '投放进行中'
         FINISHED = 'finished', '投放完成'
         TERMINATED = 'terminated', '已终止'
-        TERMINATED_BY_ADMIN = 'terminated_by_admin', '被管理员驳回'
+        TERMINATED_BY_ADMIN = 'terminated_by_admin', '需要修改'
         CANCELED = 'canceled', '已撤销'
 
     status = models.CharField(
@@ -135,6 +135,7 @@ class BirthboardRejectedIssue(models.Model):
         ('暴力色情恐怖', '暴力色情恐怖'),
         ('诋毁侮辱隐私', '诋毁侮辱隐私'),
         ('敏感引战', '敏感引战'),
+        ('不适宜公开投放的内容', '不适宜公开投放的内容'),
     ]
     reasons = models.CharField(max_length=128, help_text='多选原因，逗号分隔')
     detail = models.TextField(help_text='具体违规内容')
@@ -144,7 +145,7 @@ class BirthboardRejectedIssue(models.Model):
         return self.reasons.split(',') if self.reasons else []
 
     def __str__(self):
-        return f"驳回-{self.record_id}: {self.reasons}" 
+        return f"需要修改-{self.record_id}: {self.reasons}" 
 
 # 审核员名单表
 class BirthboardApprover(models.Model):
@@ -168,9 +169,9 @@ class BirthboardContract(models.Model):
 # 确认页面已读时间记录（持久化到DB，跨浏览器同步）
 class BirthboardConfirmSeen(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='birthboard_confirm_seen')
-    participation_seen = models.DateTimeField(default=datetime.fromtimestamp(0))
-    received_seen = models.DateTimeField(default=datetime.fromtimestamp(0))
-    finished_seen = models.DateTimeField(default=datetime.fromtimestamp(0))
+    participation_seen = models.DateTimeField(default=datetime(1970, 1, 1, 8, 0))
+    received_seen = models.DateTimeField(default=datetime(1970, 1, 1, 8, 0))
+    finished_seen = models.DateTimeField(default=datetime(1970, 1, 1, 8, 0))
 
     def __str__(self):
         return f"{self.user.username} confirm_seen"
@@ -198,7 +199,7 @@ def add_birthboard_approver_by_username(username):
 
 
 class BirthboardLike(models.Model):
-    """制作名单累计点赞量（单例，主键固定为 1）。"""
+    """制作名单累计点赞量（由业务层保证仅保留一条记录）。"""
     count = models.PositiveIntegerField('累计点赞量', default=0)
 
     class Meta:

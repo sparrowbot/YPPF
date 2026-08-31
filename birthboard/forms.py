@@ -3,6 +3,9 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+__all__ = ['BirthboardForm']
+
+
 class BirthboardForm(forms.Form):
     receiver = forms.ModelChoiceField(queryset=User.objects.all(), label="被祝福用户", required=True)
     senders = forms.ModelMultipleChoiceField(queryset=User.objects.all(), label="送出用户", required=True)

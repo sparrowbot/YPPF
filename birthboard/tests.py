@@ -147,8 +147,8 @@ class BirthboardNightlyJobsTests(TestCase):
 		self, mock_open, mock_update, mock_playwright,
 	):
 		mock_open.return_value = (object(), object())
-		mock_update.return_value = (object(), object(), {})
-
+		ok_outcome = type("Outcome", (), {"ok": True, "result": True})()
+		mock_update.return_value = (object(), object(), ok_outcome)
 		now = timezone.now()
 		today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
 		target_date = today + timedelta(days=1)
@@ -183,6 +183,47 @@ class BirthboardNightlyJobsTests(TestCase):
 		kwargs = mock_update.call_args.kwargs
 		self.assertIn(os.path.abspath(rec_start.image.path), kwargs["up_image_name"])
 		self.assertIn(os.path.abspath(rec_finish.image.path), kwargs["del_image_name"])
+
+	@patch("playwright.sync_api.sync_playwright")
+	@patch("birthboard.web_controller._run_update_cycle")
+	@patch("birthboard.web_controller.open_and_login")
+	def test_nightly_update_reverts_transitions_on_failure(
+		self, mock_open, mock_update, mock_playwright,
+	):
+		# 屏幕更新失败：已推进的记录回退，避免数据库与外部屏幕永久不一致
+		mock_open.return_value = (object(), object())
+		fail_outcome = type("Outcome", (), {"ok": False, "error": "boom"})()
+		mock_update.return_value = (object(), object(), fail_outcome)
+
+		now = timezone.now()
+		today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+		target_date = today + timedelta(days=1)
+
+		rec_start = BirthboardRecord.objects.create(
+			receiver_username="r1",
+			receiver_name="r1",
+			date=target_date,
+			mode=0,
+			per_cost=1,
+			image=self.img1,
+			status=BirthboardRecord.Status.READY,
+		)
+		rec_finish = BirthboardRecord.objects.create(
+			receiver_username="r2",
+			receiver_name="r2",
+			date=target_date - timedelta(days=3),
+			mode=1,
+			per_cost=1,
+			image=self.img2,
+			status=BirthboardRecord.Status.ONGOING,
+		)
+
+		bb_jobs.birthboard_nightly_update_2345()
+
+		rec_start.refresh_from_db()
+		rec_finish.refresh_from_db()
+		self.assertEqual(rec_start.status, BirthboardRecord.Status.READY)  # 已回退
+		self.assertEqual(rec_finish.status, BirthboardRecord.Status.ONGOING)  # 已回退
 
 
 class BirthboardAutoTerminateStaleTests(TestCase):
@@ -240,6 +281,7 @@ class BirthboardLockCoordinationTests(TestCase):
 		self.img = SimpleUploadedFile("test3.jpg", b"fake-image-3", content_type="image/jpeg")
 
 	def test_handle_revoke_respects_lock(self):
+		sender = User.objects.create_user(username="lock_sender", name="Lock Sender", password="test")
 		rec = BirthboardRecord.objects.create(
 			receiver_username="x",
 			receiver_name="x",
@@ -249,22 +291,52 @@ class BirthboardLockCoordinationTests(TestCase):
 			image=self.img,
 			status=BirthboardRecord.Status.READY,
 		)
+		BirthboardParticipant.objects.create(
+			record=rec, user=sender,
+			role=BirthboardParticipant.Role.SENDER, is_initiator=True, cost=1,
+			status=BirthboardParticipant.Status.WAIT,
+		)
 
 		cache.set(bb_views._BB_UPDATE_LOCK_KEY, True, timeout=300)
-		bb_views._handle_revoke(str(rec.id), actor=None)
+		self.assertEqual(bb_views._handle_revoke(str(rec.id), actor=sender), "locked")
 		rec.refresh_from_db()
 		self.assertEqual(rec.status, BirthboardRecord.Status.READY)
 
 		cache.delete(bb_views._BB_UPDATE_LOCK_KEY)
-		bb_views._handle_revoke(str(rec.id), actor=None)
+		self.assertEqual(bb_views._handle_revoke(str(rec.id), actor=sender), "ok")
 		rec.refresh_from_db()
 		self.assertEqual(rec.status, BirthboardRecord.Status.CANCELED)
+
+	def test_revoke_rejected_for_non_owner(self):
+		# 越权撤销回归测试：非发起人/寿星不能撤销他人投放
+		owner = User.objects.create_user(username="owner", name="Owner", password="test")
+		outsider = User.objects.create_user(username="outsider", name="Outsider", password="test")
+		rec = BirthboardRecord.objects.create(
+			receiver_username=owner.username,
+			receiver_name=owner.username,
+			date=timezone.now().date(),
+			mode=0,
+			per_cost=1,
+			image=self.img,
+			status=BirthboardRecord.Status.READY,
+		)
+		BirthboardParticipant.objects.create(
+			record=rec, user=owner,
+			role=BirthboardParticipant.Role.SENDER, is_initiator=True, cost=1,
+			status=BirthboardParticipant.Status.WAIT,
+		)
+		self.assertEqual(bb_views._handle_revoke(str(rec.id), actor=outsider), "forbidden")
+		rec.refresh_from_db()
+		self.assertEqual(rec.status, BirthboardRecord.Status.READY)
 
 
 class LockUiIntegrationTests(TestCase):
 	def setUp(self):
 		self.user = User.objects.create_user(username="tester", name="Tester", password="test")
 		self.approver = User.objects.create_user(username="approver", name="Approver", password="test")
+		User.objects.filter(pk__in=[self.user.pk, self.approver.pk]).update(
+			utype=User.Type.STUDENT, is_newuser=False
+		)
 		from birthboard.models import BirthboardApprover, BirthboardContract
 		BirthboardApprover.objects.create(user=self.approver, is_active=True)
 		BirthboardContract.objects.create(user=self.user, signed=True)
@@ -295,6 +367,36 @@ class LockUiIntegrationTests(TestCase):
 		self.assertIn('disabled', content)
 		# clean
 		cache.delete("birthboard:update_in_progress")
+
+	def test_confirm_form_includes_csrf_token(self):
+		"""确认扣款表单必须携带 CSRF token，否则 csrf_protect 会拒绝提交（403）。"""
+		self.client.login(username="tester", password="test")
+		img = SimpleUploadedFile("img_csrf.jpg", b"img", content_type="image/jpeg")
+		rec = BirthboardRecord.objects.create(
+			receiver_username="someone",
+			receiver_name="someone",
+			date=timezone.now().date(),
+			mode=0,
+			per_cost=5,
+			image=img,
+			status=BirthboardRecord.Status.WAITING_CONFIRM,
+		)
+		BirthboardParticipant.objects.create(
+			record=rec, user=self.user,
+			role=BirthboardParticipant.Role.SENDER, is_initiator=False, cost=5,
+			status=BirthboardParticipant.Status.WAIT,
+		)
+		resp = self.client.get(
+			reverse('birthboard_confirm') + '?tab=participation',
+			HTTP_REFERER='/birthboard/',
+		)
+		self.assertEqual(resp.status_code, 200)
+		content = resp.content.decode('utf-8')
+		self.assertIn('id="confirm-form-%d"' % rec.id, content)
+		# confirm-form 内部必须包含 csrfmiddlewaretoken 隐藏字段
+		start = content.index('id="confirm-form-%d"' % rec.id)
+		end = content.index('确认扣款', start)
+		self.assertIn('csrfmiddlewaretoken', content[start:end])
 
 	def test_approve_page_shows_only_one_pending_request(self):
 		self.client.login(username="approver", password="test")
@@ -451,6 +553,10 @@ class BirthboardConcurrencyFixTests(TestCase):
 		self.receiver = User.objects.create_user(username="receiver", name="Receiver", password="test")
 		self.sender.YQpoint = 100
 		self.sender.save(update_fields=["YQpoint"])
+		# 普通用户需完成 onboarding 且为有效账号，避免 check_user_access 重定向阻断页面流程
+		User.objects.filter(pk__in=[self.sender.pk, self.receiver.pk]).update(
+			utype=User.Type.STUDENT, is_newuser=False
+		)
 		from birthboard.models import BirthboardContract
 		BirthboardContract.objects.create(user=self.sender, signed=True)
 		BirthboardContract.objects.create(user=self.receiver, signed=True)
@@ -495,6 +601,11 @@ class BirthboardConcurrencyFixTests(TestCase):
 	def test_receiver_confirm_ignored_after_termination(self):
 		# 撤销后，被祝福人（旧页面）确认不能把已终止记录改回待审批
 		record = self._make_record(BirthboardRecord.Status.WAITING_RECEIVER)
+		BirthboardParticipant.objects.create(
+			record=record, user=self.sender,
+			role=BirthboardParticipant.Role.SENDER, is_initiator=True, cost=10,
+			status=BirthboardParticipant.Status.WAIT,
+		)
 		receiver_part = BirthboardParticipant.objects.create(
 			record=record, user=self.receiver,
 			role=BirthboardParticipant.Role.RECEIVER, is_initiator=False, cost=0,
@@ -544,6 +655,9 @@ class BirthboardConcurrencyFixTests(TestCase):
 		from birthboard.models import BirthboardApprover, BirthboardContract, BirthboardSecondApprover
 		first = User.objects.create_user(username="first_a", name="FirstA", password="test")
 		second = User.objects.create_user(username="second_a", name="SecondA", password="test")
+		User.objects.filter(username__in=["first_a", "second_a"]).update(
+			utype=User.Type.STUDENT, is_newuser=False
+		)
 		BirthboardApprover.objects.create(user=first, is_active=True)
 		BirthboardSecondApprover.objects.create(user=second, is_active=True)
 		BirthboardContract.objects.create(user=second, signed=True)
@@ -580,6 +694,9 @@ class BirthboardConcurrencyFixTests(TestCase):
 		from birthboard.models import BirthboardApprover, BirthboardContract, BirthboardSecondApprover
 		first = User.objects.create_user(username="first_b", name="FirstB", password="test")
 		second = User.objects.create_user(username="second_b", name="SecondB", password="test")
+		User.objects.filter(username__in=["first_b", "second_b"]).update(
+			utype=User.Type.STUDENT, is_newuser=False
+		)
 		BirthboardApprover.objects.create(user=first, is_active=True)
 		BirthboardSecondApprover.objects.create(user=second, is_active=True)
 		BirthboardContract.objects.create(user=second, signed=True)
@@ -636,6 +753,9 @@ class BirthboardLikeTests(TestCase):
 
 	def setUp(self):
 		self.user = User.objects.create_user(username="liker", name="Liker", password="test")
+		self.user.utype = User.Type.STUDENT
+		self.user.is_newuser = False
+		self.user.save(update_fields=["utype", "is_newuser"])
 		from birthboard.models import BirthboardContract
 		BirthboardContract.objects.create(user=self.user, signed=True)
 		self.client.login(username="liker", password="test")
@@ -665,6 +785,9 @@ class BirthboardReminderSeenTests(TestCase):
 
 	def setUp(self):
 		self.user = User.objects.create_user(username="reminder_user", name="提醒测试", password="test")
+		self.user.utype = User.Type.STUDENT
+		self.user.is_newuser = False
+		self.user.save(update_fields=["utype", "is_newuser"])
 		from birthboard.models import BirthboardContract
 		BirthboardContract.objects.create(user=self.user, signed=True)
 		self.client.login(username="reminder_user", password="test")
@@ -716,3 +839,33 @@ class ContributorOrgsConfigTests(TestCase):
 			for col in org["columns"]:
 				self.assertIsInstance(col, list)
 				self.assertTrue(all(isinstance(name, str) and name for name in col))
+
+
+class BirthboardCheckYqpointTests(TestCase):
+	"""check_yqpoint 只允许查询本人余额。"""
+
+	def setUp(self):
+		self.user = User.objects.create_user(username="me_cq", name="MeCq", password="test")
+		self.user.utype = User.Type.STUDENT
+		self.user.is_newuser = False
+		self.user.YQpoint = 42
+		self.user.save(update_fields=["utype", "is_newuser", "YQpoint"])
+		self.other = User.objects.create_user(username="other_cq", name="OtherCq", password="test")
+		self.other.YQpoint = 999
+		self.other.save(update_fields=["YQpoint"])
+		self.client.force_login(self.user)
+
+	def test_only_returns_self_balance(self):
+		# 传入他人用户名列表，接口也只返回本人余额，不泄露他人
+		import json
+		resp = self.client.post(
+			reverse("check_yqpoint"),
+			data=json.dumps({"senders": ["other_cq", "me_cq"], "mode": 0, "sender_count": 1}),
+			content_type="application/json",
+		)
+		self.assertEqual(resp.status_code, 200)
+		data = resp.json()
+		self.assertTrue(data["ok"])
+		self.assertIn("me_cq", data["result"])
+		self.assertNotIn("other_cq", data["result"])
+		self.assertEqual(data["result"]["me_cq"]["balance"], 42)

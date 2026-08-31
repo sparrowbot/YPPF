@@ -13,6 +13,8 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_protect
 from django.contrib.auth.decorators import login_required
 
+from app.utils import check_user_access
+
 from birthboard.models import (
     BirthboardRecord,
     ChangeRecord,
@@ -64,6 +66,22 @@ from birthboard.config import CONFIG, shihannet
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    'require_contract',
+    'birthboard',
+    'birthboard_contract',
+    'birthboard_sign_contract',
+    'birthboard_like_count',
+    'birthboard_like_add',
+    'birthboard_reminder_seen',
+    'time_now',
+    'confirm_tab_count_api',
+    'birthboard_confirm',
+    'birthboard_accept',
+    'birthboard_approve_denied',
+    'birthboard_approve',
+]
+
 
 def require_contract(view_func):
     """装饰器：要求用户已签署协议才能访问。"""
@@ -78,24 +96,41 @@ def require_contract(view_func):
     return wrapper
 
 
-def _handle_revoke(revoke_id: str, actor=None) -> bool:
+def _handle_revoke(revoke_id: str, actor=None) -> str:
     """处理撤销请求：改状态为CANCELED但不退款。
 
     Returns:
-        True 表示撤销请求已处理（含记录不存在）；False 表示因夜间同步
-        窗口（23:45-24:00）被拒绝，调用方可据此提示用户刷新页面。
+        - 'ok': 撤销请求已处理（含记录不存在）
+        - 'locked': 因夜间同步窗口（23:45-24:00）被拒绝，调用方可据此提示刷新页面
+        - 'forbidden': 调用者不是该投放的发起人或寿星，无权撤销
     """
     # 如果正在执行批量更新（夜间任务），拒绝冲突操作
     try:
         if cache.get(_BB_UPDATE_LOCK_KEY):
             logger.info("_handle_revoke: update in progress, reject revoke %s", revoke_id)
-            return False
+            return "locked"
     except Exception:
         # 忽略 cache 异常，继续执行以保持兼容性
         pass
     try:
         with transaction.atomic():
             record = BirthboardRecord.objects.select_for_update().get(id=revoke_id)
+            # 权限校验：仅发起人或寿星可撤销，避免他人按可猜测的记录 ID 取消
+            # 别人的投放（含投放中，会触发从外部屏幕移除）。必须在行锁内校验。
+            is_initiator = record.participants.filter(
+                user=actor,
+                role=BirthboardParticipant.Role.SENDER,
+                is_initiator=True,
+            ).exists()
+            if actor is None or not (
+                is_initiator or record.receiver_username == actor.username
+            ):
+                logger.warning(
+                    "[birthboard.views] _handle_revoke: forbidden revoke_id=%s actor=%s",
+                    revoke_id,
+                    actor.username if actor else None,
+                )
+                return "forbidden"
             before_status = record.status
             record.status = record.Status.CANCELED
             record.save(update_fields=["status"])
@@ -144,9 +179,9 @@ def _handle_revoke(revoke_id: str, actor=None) -> bool:
                 # 忽略任何与补充逻辑相关的异常，确保撤销流程不被中断
                 pass
         notify_revoke(record)
-        return True
+        return "ok"
     except BirthboardRecord.DoesNotExist:
-        return True
+        return "ok"
 
 
 def _log_record_change(record: BirthboardRecord, actor, action: str, before_status: str = '', after_status: str = '', detail=None) -> None:
@@ -178,7 +213,7 @@ STATUS_DISPLAY = {
     'ongoing': '进行中',
     'finished': '已完成',
     'terminated': '中止',
-    'terminated_by_admin': '驳回',
+    'terminated_by_admin': '需要修改',
     'canceled': '撤销',
 }
 
@@ -339,7 +374,7 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord, actor=None
 
 
 def _get_today_entry_reminders(user):
-    now = timezone.now()
+    now = datetime.now()
     today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
     # Only consider records that are actively ongoing
     ongoing_status = BirthboardRecord.Status.ONGOING
@@ -389,7 +424,7 @@ def _get_today_entry_reminders(user):
 
 def _get_birthboard_date_rule(now_dt=None):
     if now_dt is None:
-        now_dt = timezone.now()
+        now_dt = datetime.now()
         if timezone.is_aware(now_dt):
             now_dt = timezone.localtime(now_dt)
         # now_dt = timezone.make_aware(datetime(2026, 5, 3, 12, 0))
@@ -449,12 +484,13 @@ def birthboard_sign_contract(request):
     """签署协议 API：将当前用户 contract 设为 True"""
     contract, _ = BirthboardContract.objects.get_or_create(user=request.user)
     contract.signed = True
-    contract.signed_at = timezone.now()
+    contract.signed_at = datetime.now()
     contract.save(update_fields=["signed", "signed_at"])
     return JsonResponse({"ok": True})
 
 
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_http_methods(["GET"])
 def birthboard_like_count(request):
     """制作名单累计点赞量查询接口：返回当前累计值。"""
@@ -464,6 +500,7 @@ def birthboard_like_count(request):
 
 @csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_http_methods(["POST"])
 def birthboard_like_add(request):
     """制作名单点赞接口：累计点赞量 +1，返回新值。"""
@@ -475,13 +512,14 @@ def birthboard_like_add(request):
 
 @csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_http_methods(["POST"])
 def birthboard_reminder_seen(request):
     """记录今日提醒（happy/bless）已展示：服务端去重，跨设备有效。"""
     reminder_type = request.POST.get("type")
     if reminder_type not in ("happy", "bless"):
         return JsonResponse({"ok": False, "error": "invalid type"}, status=400)
-    now = timezone.now()
+    now = datetime.now()
     today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
     BirthboardReminderSeen.objects.get_or_create(
         user=request.user,
@@ -493,8 +531,8 @@ def birthboard_reminder_seen(request):
 
 @require_http_methods(["GET"])
 def time_now(request):
-    """Return current server time (uses patched timezone.now if middleware enabled)."""
-    now = timezone.now()
+    """Return current server time."""
+    now = datetime.now()
     try:
         iso = now.isoformat()
     except Exception:
@@ -537,6 +575,7 @@ def _generate_birthboard_image_filename(image, date, submit_time=None) -> str:
 
 @csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 @require_http_methods(["GET", "POST"])
 def birthboard(request):
@@ -947,6 +986,7 @@ def _get_confirm_tab_total_count(request, user) -> int:
 
 
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 def confirm_tab_count_api(request):
     """返回确认页面三个tab的未读计数之和 (JSON)。"""
@@ -954,7 +994,9 @@ def confirm_tab_count_api(request):
     return JsonResponse({"total": count})
 
 
+@csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 @xframe_options_exempt
 def birthboard_confirm(request):
@@ -1045,8 +1087,11 @@ def birthboard_confirm(request):
                 except BirthboardRecord.DoesNotExist:
                     pass
             elif revoke_id:
-                if not _handle_revoke(revoke_id, actor=request.user):
+                revoke_result = _handle_revoke(revoke_id, actor=request.user)
+                if revoke_result == "locked":
                     return redirect(f"{reverse('birthboard_confirm')}?tab=received&error=concurrency")
+                if revoke_result == "forbidden":
+                    return redirect(f"{reverse('birthboard_confirm')}?tab=received&error=forbidden")
             return redirect(f"{reverse('birthboard_confirm')}?tab=received")
 
         record_id = request.POST.get("record_id")
@@ -1104,7 +1149,11 @@ def birthboard_confirm(request):
                             detail={'sender': request.user.username, 'amount': record.per_cost},
                         )
                         # ========== 企业微信通知：扣款成功时发送 ==========
-                        notify_payment_success(record, request.user.username, all_paid)
+                        transaction.on_commit(
+                            lambda: notify_payment_success(
+                                record, request.user.username, all_paid
+                            )
+                        )
             except BirthboardRecord.DoesNotExist:
                 pass
         elif reject_id:
@@ -1123,8 +1172,11 @@ def birthboard_confirm(request):
             except BirthboardRecord.DoesNotExist:
                 pass
         elif revoke_id:
-            if not _handle_revoke(revoke_id, actor=request.user):
+            revoke_result = _handle_revoke(revoke_id, actor=request.user)
+            if revoke_result == "locked":
                 return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=concurrency")
+            if revoke_result == "forbidden":
+                return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=forbidden")
         elif abort_id:
             # 并发安全：夜间同步窗口（23:45-24:00）内禁止中止退款，与撤销分支保持一致。
             try:
@@ -1209,12 +1261,14 @@ def birthboard_confirm(request):
 
 
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 def birthboard_accept(request):
     return redirect(f"{reverse('birthboard_confirm')}?tab=received")
 
 
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 def birthboard_approve_denied(request):
     return render(request, "birthboard/birthboard_approve_denied.html", {
@@ -1305,7 +1359,9 @@ def _get_next_birthboard_approval_activity(current_user, is_first: bool, is_seco
             }
     return None
 
+@csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_contract
 @require_http_methods(["GET", "POST"])
 def birthboard_approve(request):
@@ -1325,103 +1381,103 @@ def birthboard_approve(request):
         # 最终带 error=concurrency 重定向，前端弹窗提示"系统错误，请刷新"。
         error_concurrency = False
         if revoke_id:
-            if not _handle_revoke(revoke_id, actor=request.user):
+            revoke_result = _handle_revoke(revoke_id, actor=request.user)
+            if revoke_result == "locked":
                 return redirect(f"{request.path}?error=concurrency")
+            if revoke_result == "forbidden":
+                return redirect(f"{request.path}?error=forbidden")
             return redirect(request.path)
         try:
             with transaction.atomic():
-                # 并发安全：在事务内锁定记录行，避免并发一审/二审时的
-                # "读-改-写"竞争导致重复通过或审核人字段被覆盖。
+                # 并发安全：在事务内锁定记录行，并在同一事务内完成全部状态检查与
+                # 审核/驳回变更，避免并发一审/二审读到旧状态后互相覆盖。
                 record = BirthboardRecord.objects.select_for_update().get(id=record_id)
-        except BirthboardRecord.DoesNotExist:
-            message = "未找到该记录。"
-        else:
-            if record.status == BirthboardRecord.Status.WAITING_APPROVE:
-                # 并发安全：记录行已在上方事务内锁定，此处读到的是最新状态
-                
-                # 检查管理员是否与该投放有关
-                if _is_user_related_to_record(record, request.user):
-                    message = "此投放活动与你有关，你不能参与审核。"
-                # 一审操作
-                elif is_first and not record.first_approved:
-                    if action == "approve":
-                        if record.first_approved:
-                            error_concurrency = True
-                        else:
-                            before_status = record.status
-                            record.first_approved = True
-                            record.first_approver = request.user
-                            record.first_approved_at = datetime.now()
-                            record.save(update_fields=["first_approved", "first_approver", "first_approved_at"])
-                            cancel_approval_reminders(record, stage='first')
-                            schedule_second_approval_reminders(record)
-                            _log_record_change(
-                                record,
-                                actor=request.user,
-                                action=ChangeRecord.Action.APPROVE,
-                                before_status=before_status,
-                                after_status=record.status,
-                                detail={'stage': 'first'},
-                            )
-                            message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过初审，等待终审。"
-                    elif action == "reject":
-                        if record.first_approved:
-                            error_concurrency = True
-                        else:
-                            reasons = request.POST.getlist("reasons")
-                            detail = request.POST.get("detail", "")
-                            _reject_record_by_admin(record, reasons, detail, actor=request.user)
-                            cancel_approval_reminders(record, stage='first')
-                            message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
-                # 二审操作
-                elif is_second and record.first_approved:
-                    if action == "approve":
-                        if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
-                            error_concurrency = True
-                        else:
-                            # 并发安全：夜间同步窗口（23:45-24:00）内禁止终审通过，
-                            # 避免产生的新 READY 错过当夜投放；与撤销/中止的同步锁检查一致。
-                            try:
-                                update_in_progress = bool(cache.get(_BB_UPDATE_LOCK_KEY))
-                            except Exception:
-                                # 忽略 cache 异常，继续执行以保持兼容性
-                                update_in_progress = False
-                            if update_in_progress:
+                if record.status == BirthboardRecord.Status.WAITING_APPROVE:
+                    # 检查管理员是否与该投放有关
+                    if _is_user_related_to_record(record, request.user):
+                        message = "此投放活动与你有关，你不能参与审核。"
+                    # 一审操作
+                    elif is_first and not record.first_approved:
+                        if action == "approve":
+                            if record.first_approved:
                                 error_concurrency = True
                             else:
                                 before_status = record.status
-                                record.status = BirthboardRecord.Status.READY
-                                record.second_approver = request.user
-                                record.second_approved_at = datetime.now()
-                                record.save(update_fields=["status", "second_approver", "second_approved_at"])
-                                cancel_approval_reminders(record, stage='second')
+                                record.first_approved = True
+                                record.first_approver = request.user
+                                record.first_approved_at = datetime.now()
+                                record.save(update_fields=["first_approved", "first_approver", "first_approved_at"])
+                                cancel_approval_reminders(record, stage='first')
+                                schedule_second_approval_reminders(record)
                                 _log_record_change(
                                     record,
                                     actor=request.user,
                                     action=ChangeRecord.Action.APPROVE,
                                     before_status=before_status,
                                     after_status=record.status,
-                                    detail={'stage': 'second'},
+                                    detail={'stage': 'first'},
                                 )
-                                message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过终审。"
-                    elif action == "reject":
-                        if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
-                            error_concurrency = True
-                        else:
-                            reasons = request.POST.getlist("reasons")
-                            detail = request.POST.get("detail", "")
-                            _reject_record_by_admin(record, reasons, detail, actor=request.user)
-                            cancel_approval_reminders(record, stage='second')
-                            message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
-            elif action == "reject":
-                # READY/ONGOING 等非待审核状态的驳回
-                if _is_user_related_to_record(record, request.user):
-                    message = "此投放活动与你有关，你不能参与审核。"
-                else:
-                    reasons = request.POST.getlist("reasons")
-                    detail = request.POST.get("detail", "")
-                    _reject_record_by_admin(record, reasons, detail, actor=request.user)
-                    message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
+                                message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过初审，等待终审。"
+                        elif action == "reject":
+                            if record.first_approved:
+                                error_concurrency = True
+                            else:
+                                reasons = request.POST.getlist("reasons")
+                                detail = request.POST.get("detail", "")
+                                _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                                cancel_approval_reminders(record, stage='first')
+                                message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
+                    # 二审操作
+                    elif is_second and record.first_approved:
+                        if action == "approve":
+                            if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
+                                error_concurrency = True
+                            else:
+                                # 并发安全：夜间同步窗口（23:45-24:00）内禁止终审通过，
+                                # 避免产生的新 READY 错过当夜投放；与撤销/中止的同步锁检查一致。
+                                try:
+                                    update_in_progress = bool(cache.get(_BB_UPDATE_LOCK_KEY))
+                                except Exception:
+                                    # 忽略 cache 异常，继续执行以保持兼容性
+                                    update_in_progress = False
+                                if update_in_progress:
+                                    error_concurrency = True
+                                else:
+                                    before_status = record.status
+                                    record.status = BirthboardRecord.Status.READY
+                                    record.second_approver = request.user
+                                    record.second_approved_at = datetime.now()
+                                    record.save(update_fields=["status", "second_approver", "second_approved_at"])
+                                    cancel_approval_reminders(record, stage='second')
+                                    _log_record_change(
+                                        record,
+                                        actor=request.user,
+                                        action=ChangeRecord.Action.APPROVE,
+                                        before_status=before_status,
+                                        after_status=record.status,
+                                        detail={'stage': 'second'},
+                                    )
+                                    message = f"活动 {record.receiver_name}({record.receiver_username}) 已通过终审。"
+                        elif action == "reject":
+                            if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
+                                error_concurrency = True
+                            else:
+                                reasons = request.POST.getlist("reasons")
+                                detail = request.POST.get("detail", "")
+                                _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                                cancel_approval_reminders(record, stage='second')
+                                message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
+                elif action == "reject":
+                    # READY/ONGOING 等非待审核状态的驳回
+                    if _is_user_related_to_record(record, request.user):
+                        message = "此投放活动与你有关，你不能参与审核。"
+                    else:
+                        reasons = request.POST.getlist("reasons")
+                        detail = request.POST.get("detail", "")
+                        _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                        message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
+        except BirthboardRecord.DoesNotExist:
+            message = "未找到该记录。"
         # 防止重复提交，POST-Redirect-GET；并发冲突时带 error=concurrency，前端弹窗提示刷新。
         if error_concurrency:
             return redirect(f"{request.path}?error=concurrency")

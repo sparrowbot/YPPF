@@ -26,6 +26,21 @@ from birthboard.models import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    'notify_revoke',
+    'notify_refund',
+    'notify_auto_reject_refund',
+    'notify_invite_sender',
+    'notify_receiver_confirmed',
+    'notify_payment_success',
+    'notify_waiting_reminder',
+    'notify_broadcast_starting_tomorrow',
+    'notify_broadcast_started',
+    'notify_broadcast_ended',
+    'notify_broadcast_ending_soon',
+    'notify_approval_reminder',
+]
+
 
 def _receiver_user(record: BirthboardRecord):
     """寿星账号对象；账号不存在时返回 None。"""

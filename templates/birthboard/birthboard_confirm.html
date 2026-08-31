@@ -93,10 +93,10 @@
                 {% endif %}
                 <div class="textN" style="width: 740px; text-align: left; align-self: flex-end; line-height: 1.7; background-color: #00000010; margin-top: 27px;">
                     {% if activity.record_status == 'terminated_by_admin' %}
-                        <span class="textB" style="color: #c00000; ">已被管理员驳回</span>
+                        <span class="textB" style="color: #c00000; ">需要修改</span>
                         {% if activity.rejected_reasons or activity.rejected_detail %}
                             <div class="alert alert-danger mt-2">
-                                <div><span class="textLb">驳回原因：</span>{{ activity.rejected_reasons|join:'，' }}</div>
+                                <div><span class="textLb">修改原因：</span>{{ activity.rejected_reasons|join:'，' }}</div>
                                 <div><span class="textLb">详细说明：</span>{{ activity.rejected_detail }}</div>
                             </div>
                         {% endif %}
@@ -479,6 +479,7 @@
                         <tr>
                             <td class="textLb" style="text-align:left;">
                                 <form method="post" class="mt-3 d-inline" id="confirm-form-{{ activity.id }}">
+                                    {% csrf_token %}
                                     <input type="hidden" name="tab" value="participation">
                                     <input type="hidden" name="record_id" value="{{ activity.id }}">
                                     <button type="button" class="downbtn textN" style="width: 100%;" onclick="checkBalanceBeforeConfirm('{{ activity.id }}')">确认扣款</button>
@@ -876,6 +877,15 @@
 // 并发冲突：弹出浏览器原生消息框，点击确定后刷新整个页面
 (function() {
     alert('系统错误，请刷新');
+    window.top.location.reload();
+})();
+</script>
+{% endif %}
+{% if request.GET.error == 'forbidden' %}
+<script>
+// 越权操作：无权撤销该投放，刷新页面
+(function() {
+    alert('您无权撤销此投放');
     window.top.location.reload();
 })();
 </script>

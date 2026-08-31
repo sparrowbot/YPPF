@@ -1239,7 +1239,7 @@ def _run_update_cycle(playwright, browser, page, url, username, password, up_ima
         )
         if not outcome.ok:
             print(f"步骤[{label}]最终失败: {outcome.error or outcome.result}")
-            # return browser, page, outcome
+            return browser, page, outcome
 
     return browser, page, StepOutcome(label="update_cycle", ok=True, result=True)
 

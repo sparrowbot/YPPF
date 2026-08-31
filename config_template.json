@@ -146,5 +146,10 @@
                 ]
             }
         ]
+    },
+    "shihannet": {
+        "url": "$SHIHANNET_URL$",
+        "username": "$SHIHANNET_USERNAME$",
+        "password": "$SHIHANNET_PASSWORD$"
     }
 }

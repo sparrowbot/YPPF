@@ -56,7 +56,7 @@
                                 <div class="info-stack">
                                     <div class="info-label">投放方式</div>
                                     <div class="info-value">
-                                        {% if record.mode == 0 %}35元气值/1天{% elif record.mode == 1 %}60元气值/3天{% elif record.mode == 2 %}1000元气值/1年{% else %}未知模式{% endif %}
+                                        {% if record.mode == 0 %}35元气值/1天{% elif record.mode == 1 %}60元气值/3天{% elif record.mode == 2 %}10000元气值/1年{% else %}未知模式{% endif %}
                                     </div>
                                 </div>
                             </td>
@@ -128,6 +128,7 @@
                                         <option value="暴力色情恐怖">暴力色情恐怖</option>
                                         <option value="诋毁侮辱隐私">诋毁侮辱隐私</option>
                                         <option value="敏感引战">敏感引战</option>
+                                        <option value="不适宜公开投放的内容">不适宜公开投放的内容</option>
                                     </select>
                                 </div>
                                 <div class="form-group" style="margin-bottom:24px;">
@@ -175,7 +176,7 @@
                 <span class="filter-chip active" data-status="ongoing">投放中</span>
                 <span class="filter-chip" data-status="finished">已完成</span>
                 <span class="filter-chip" data-status="terminated">已终止</span>
-                <span class="filter-chip" data-status="terminated_by_admin">已驳回</span>
+                <span class="filter-chip" data-status="terminated_by_admin">需要修改</span>
                 <span class="filter-chip" data-status="canceled">已撤销</span>
             </div>
             <span class="filter-label" style="margin-left:12px;">搜索：</span>
@@ -240,10 +241,10 @@
                 <!-- 状态相关操作 -->
                 {% if item.record_status == 'terminated_by_admin' %}
                 <div class="textN" style="width: 740px; text-align: center; line-height: 1.7; background-color: #00000010; margin-top: 9px; padding: 9px;">
-                    <span class="textB" style="color: #c00000;">已被管理员驳回</span>
+                    <span class="textB" style="color: #c00000;">需要修改</span>
                     {% if item.rejected_reasons or item.rejected_detail %}
                         <div class="alert alert-danger mt-2">
-                            <div><span class="textLb">驳回原因：</span>{{ item.rejected_reasons|join:'，' }}</div>
+                            <div><span class="textLb">修改原因：</span>{{ item.rejected_reasons|join:'，' }}</div>
                             <div><span class="textLb">详细说明：</span>{{ item.rejected_detail }}</div>
                         </div>
                     {% endif %}
@@ -288,6 +289,7 @@
                                         <option value="暴力色情恐怖">暴力色情恐怖</option>
                                         <option value="诋毁侮辱隐私">诋毁侮辱隐私</option>
                                         <option value="敏感引战">敏感引战</option>
+                                        <option value="不适宜公开投放的内容">不适宜公开投放的内容</option>
                                     </select>
                                 </div>
                                 <div class="form-group" style="margin-bottom:24px;">
@@ -357,6 +359,7 @@
                                         <option value="暴力色情恐怖">暴力色情恐怖</option>
                                         <option value="诋毁侮辱隐私">诋毁侮辱隐私</option>
                                         <option value="敏感引战">敏感引战</option>
+                                        <option value="不适宜公开投放的内容">不适宜公开投放的内容</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
@@ -552,6 +555,15 @@ document.querySelectorAll('.approval-image-row img').forEach(function(el) {
 // 并发冲突：弹出浏览器原生消息框，点击确定后刷新页面
 (function() {
     alert('系统错误，请刷新');
+    window.location.reload();
+})();
+</script>
+{% endif %}
+{% if request.GET.error == 'forbidden' %}
+<script>
+// 越权操作：无权撤销该投放，刷新页面
+(function() {
+    alert('您无权撤销此投放');
     window.location.reload();
 })();
 </script>

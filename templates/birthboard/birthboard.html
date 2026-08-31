@@ -1668,7 +1668,7 @@
           $("#senders").removeAttr("required"); // 禁用select2自带校验
           $("#senders").empty().select2({
             theme: "my-custom-theme",
-            placeholder: "请选择",
+            placeholder: "非必选",
             allowClear: true,
             data: filtered,
             matcher: matchUser,
@@ -2275,6 +2275,7 @@
             url: "/birthboard/api/check_yqpoint/",
             method: "POST",
             contentType: "application/json",
+            headers: { 'X-CSRFToken': '{{ csrf_token }}' },
             data: JSON.stringify({
               senders: senderUsernamesForCheck,
               mode: mode,
