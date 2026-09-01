@@ -77,14 +77,11 @@
                 name="senders"
                 style="width: 100%"
                 ></select>
-                <!-- <div
+                <div
                 class="invalid-feedback"
                 id="senders-error"
                 style="display: none"
-                ></div>
-                <div class="mt-2">
-                <strong>已选择：</strong><span id="selected-senders-list">无</span>
-                </div> -->
+                >{% if form.senders.errors %}{{ form.senders.errors|join:"，" }}{% endif %}</div>
             </div>
             <div class="form-group overlay-select" id="mode-group">
             <!-- <label for="mode">投放模式</label> -->
@@ -132,7 +129,7 @@
                     class="invalid-feedback"
                     id="image-error"
                     style="display: none; margin-top: 105px;"
-                ></div>
+                >{% if form.image.errors %}{{ form.image.errors|join:"，" }}{% endif %}</div>
             </div>
             <div id="cost-group">
                 <span id="cost-per-user">-</span>
@@ -1128,9 +1125,52 @@
       });
 
       function onSubmitTargetLoaded() {
-          if (_formSubmitted) {
-              _formSubmitted = false;
-              $('html').css('scroll-behavior', 'auto');
+          if (!_formSubmitted) {
+              return;
+          }
+          _formSubmitted = false;
+          // 读取隐藏提交 iframe（同源）里的服务端表单校验结果；
+          // 校验失败时把错误回填到主页面槽位，不重置表单，用户可修正后重提。
+          var submitFrame = document.getElementById('birthboard-submit-target');
+          var frameDoc = null;
+          try {
+              frameDoc = submitFrame.contentDocument
+                  || submitFrame.contentWindow.document;
+          } catch (e) {
+              frameDoc = null;
+          }
+          var serverErrors = {};
+          if (frameDoc) {
+              var frameSendersErr = frameDoc.getElementById('senders-error');
+              var frameImageErr = frameDoc.getElementById('image-error');
+              if (frameSendersErr && frameSendersErr.textContent.trim()) {
+                  serverErrors.senders = frameSendersErr.textContent.trim();
+              }
+              if (frameImageErr && frameImageErr.textContent.trim()) {
+                  serverErrors.image = frameImageErr.textContent.trim();
+              }
+          }
+          if (serverErrors.senders || serverErrors.image) {
+              // 表单校验失败：重新启用被禁用的控件并显示错误
+              $('#receiver').prop('disabled', false);
+              $('#senders').prop('disabled', false);
+              var firstErrorTop = null;
+              if (serverErrors.senders) {
+                  $('#senders-error').show().text(serverErrors.senders);
+                  firstErrorTop = $('#senders-group').offset().top;
+              }
+              if (serverErrors.image) {
+                  $('#image-error').show().text(serverErrors.image);
+                  if (!firstErrorTop) {
+                      firstErrorTop = $('#image-group').offset().top;
+                  }
+              }
+              if (firstErrorTop) {
+                  $('html, body').animate({ scrollTop: firstErrorTop - 100 }, 300);
+              }
+              return;
+          }
+          $('html').css('scroll-behavior', 'auto');
               $('html, body').animate({
                   scrollTop: $('#confirm-section').offset().top - 270
               }, 10000, 'swing', function() {
@@ -1163,7 +1203,6 @@
                   // 刷新确认计数
                   setTimeout(refreshConfirmCount, 500);
               }, 3000);
-          }
       }
 
       /*
@@ -1608,6 +1647,8 @@
           "{{ request.user.get_full_name|default:request.user.username|escapejs }}";
         // 用户列表
         const userInfos = CONTEXT.user_infos;
+        // 送出者人数上限（与后端 clean_senders 保持一致）
+        const maxSenders = CONTEXT.max_senders;
         // console.log(currentUserId);
         // console.log(currentUserName);
         // 初始化被祝福用户下拉框（排除自己）
@@ -1739,7 +1780,9 @@
           let mode = parseInt($("#mode").val());
           let total = modeCost[isNaN(mode) ? 0 : mode];
           let count = 1 + selected.length;
+          // 与后端 calculate_per_cost 保持一致：向上取整，且每人不低于 2 元气值
           let per = Math.floor(total / count);
+          if (per < 2) per = 2;
           $("#cost-per-user").html('<span class="cost-num">' + count + '</span> 人，每人 <span class="cost-num">' + per + '</span> 元气值');
         }
 
@@ -2398,6 +2441,14 @@
             $("#receiver-error").show().text("没有输入");
             hasError = true;
             firstErrorTop = $("#receiver-group").offset().top;
+          }
+
+          // 1.5 检查送出者人数上限（与后端 clean_senders 保持一致）
+          if (senderUsernames.length > maxSenders) {
+            $("#senders").addClass("is-invalid");
+            $("#senders-error").show().text("送出者人数不能超过 " + maxSenders + " 人");
+            hasError = true;
+            if (!firstErrorTop) firstErrorTop = $("#senders-group").offset().top;
           }
 
           // 2. 检查送出用户余额（后端实时查询）

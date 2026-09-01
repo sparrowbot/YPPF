@@ -1317,6 +1317,7 @@ class BirthboardReviewEnforcementTests(TestCase):
                 'record_id': record.pk,
                 'reasons': ['诋毁侮辱隐私'],
                 'detail': '含个人隐私',
+                'restrict': '1',
             },
         )
 
@@ -1341,6 +1342,7 @@ class BirthboardReviewEnforcementTests(TestCase):
                 'record_id': record.pk,
                 'reasons': ['诋毁侮辱隐私'],
                 'detail': '投放结束后发现含个人隐私',
+                'restrict': '1',
             },
         )
 
@@ -1355,6 +1357,27 @@ class BirthboardReviewEnforcementTests(TestCase):
         self.assertIsNotNone(restriction.restricted_until)
         self.initiator.refresh_from_db()
         self.assertEqual(self.initiator.YQpoint, 40)
+
+    def test_ongoing_violation_without_restrict_keeps_no_restriction(self):
+        from birthboard.models import BirthboardContract
+
+        record = self._record(BirthboardRecord.Status.ONGOING)
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {
+                'action': 'reject',
+                'record_id': record.pk,
+                'reasons': ['诋毁侮辱隐私'],
+                'detail': '含个人隐私',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        restriction = BirthboardContract.objects.get(user=self.initiator)
+        self.assertTrue(record.display_takedown_pending)
+        self.assertIsNone(restriction.restricted_until)
 
 
 class BirthboardDisplayRetryTests(TestCase):

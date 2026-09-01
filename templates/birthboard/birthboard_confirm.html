@@ -21,7 +21,7 @@
                 {% csrf_token %}
                 <input type="hidden" name="tab" value="participation">
                 <input type="hidden" name="mark_seen" value="1">
-                <button type="submit" class="btn mr-2 {% if active_tab == 'participation' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="position:relative; border:0; background:transparent;">
+                <button type="submit" class="btn mr-2 {% if active_tab == 'participation' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="border:0; background:transparent; padding:0;">
                 <span class="headbtn"><img src="{{ MEDIA_URL }}birthboard/participate.png" alt="参与" style="width: 55px; vertical-align: middle;"></span>  
                 <span class="prettyNumbers" style="position: absolute; left: 60px; top:4px;">{% if tab_change_counts.participation %} {{ tab_change_counts.participation }}{% endif %}</span>
                 </button>
@@ -30,16 +30,16 @@
                 {% csrf_token %}
                 <input type="hidden" name="tab" value="received">
                 <input type="hidden" name="mark_seen" value="1">
-                <button type="submit" class="btn mr-2 {% if active_tab == 'received' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="position:relative; border:0; background:transparent;">
+                <button type="submit" class="btn mr-2 {% if active_tab == 'received' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="border:0; background:transparent; padding:0;">
                 <span class="headbtn"><img src="{{ MEDIA_URL }}birthboard/receive.png" alt="收到" style="width: 60px; vertical-align: middle;"></span>
-                <span class="prettyNumbers" style="position: absolute; left: 60px; top:4px;">{% if tab_change_counts.received %} {{ tab_change_counts.received }}{% endif %}</span>
+                <span class="prettyNumbers" style="position: absolute; left: 65px; top:4px;">{% if tab_change_counts.received %} {{ tab_change_counts.received }}{% endif %}</span>
                 </button>
             </form>
             <form method="post" style="display:inline; position:relative; left:230px;">
                 {% csrf_token %}
                 <input type="hidden" name="tab" value="finished">
                 <input type="hidden" name="mark_seen" value="1">
-                <button type="submit" class="btn {% if active_tab == 'finished' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="position:relative; border:0; background:transparent;">
+                <button type="submit" class="btn {% if active_tab == 'finished' %}btn-primary{% else %}btn-outline-primary{% endif %}" style="border:0; background:transparent; padding:0;">
                 <span class="headbtn"><img src="{{ MEDIA_URL }}birthboard/history.png" alt="历史" style="width: 55px; vertical-align: middle;"></span>
                 <span class="prettyNumbers" style="position: absolute; left: 60px; top:4px;">{% if tab_change_counts.finished %}{{ tab_change_counts.finished }}{% endif %}</span>
                 </button>

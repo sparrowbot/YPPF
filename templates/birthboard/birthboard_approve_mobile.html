@@ -181,7 +181,7 @@
 
         {% if record.image %}
         <div class="thumbs">
-            <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片" onclick="showFullscreen('{% url 'birthboard_image' record.id 'image' %}')">
+            <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片" onclick="showFullscreen(this.src)">
         </div>
         {% endif %}
 
@@ -329,6 +329,12 @@
             <div class="form-group">
                 <label>具体违规内容（必填）</label>
                 <textarea name="detail" id="rejectDetail" required></textarea>
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" name="restrict" value="1">
+                    限制发起人 30 天（可后续在后台解除）
+                </label>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-disabled" onclick="hideRejectModal()">取消</button>

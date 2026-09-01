@@ -66,3 +66,7 @@ class BirthboardRejectForm(forms.Form):
         required=True,
     )
     detail = forms.CharField(required=True, max_length=1000, strip=True)
+    restrict = forms.BooleanField(
+        label='限制发起人 30 天',
+        required=False,
+    )

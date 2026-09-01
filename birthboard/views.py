@@ -384,7 +384,7 @@ def _restrict_initiator_after_display_violation(
 
 
 @transaction.atomic
-def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, actor=None) -> None:
+def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, actor=None, restrict=False) -> None:
     """Reject a record and enforce refund/takedown/restriction policy."""
     record = BirthboardRecord.objects.select_for_update().get(pk=record.pk)
     if record.status not in {
@@ -411,10 +411,7 @@ def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, acto
         record.display_takedown_pending = True
         update_fields.append('display_takedown_pending')
     record.save(update_fields=update_fields)
-    if before_status in {
-        BirthboardRecord.Status.ONGOING,
-        BirthboardRecord.Status.FINISHED,
-    }:
+    if restrict:
         _restrict_initiator_after_display_violation(record)
     _log_record_change(
         record,
@@ -747,7 +744,7 @@ def birthboard(request):
     )
     from generic.utils import to_search_indices
     user_infos = to_search_indices(users, active=True)
-    json_context = {'user_infos': user_infos}
+    json_context = {'user_infos': user_infos, 'max_senders': CONFIG.max_senders}
     today_entry_reminders = _get_today_entry_reminders(request.user)
     birthboard_date_rule = _get_birthboard_date_rule()
     birthboard_date_rule_json = _serialize_birthboard_date_rule(birthboard_date_rule)
@@ -1689,6 +1686,7 @@ def birthboard_approve(request):
         if action not in {'approve', 'reject', None}:
             return JsonResponse({'error': 'invalid action'}, status=400)
         reject_form = None
+        restrict = False
         if action == 'reject':
             reject_form = BirthboardRejectForm(request.POST)
             if not reject_form.is_valid():
@@ -1696,6 +1694,7 @@ def birthboard_approve(request):
                     {'error': 'invalid rejection reason'},
                     status=400,
                 )
+            restrict = reject_form.cleaned_data.get('restrict', False)
             if _display_update_is_locked():
                 return redirect(f"{request.path}?error=concurrency")
         # 并发冲突标志：操作被夜间同步锁拒绝或已被其他管理员处理时置位，
@@ -1756,7 +1755,7 @@ def birthboard_approve(request):
                             else:
                                 reasons = reject_form.cleaned_data['reasons']
                                 detail = reject_form.cleaned_data['detail']
-                                _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                                _reject_record_by_admin(record, reasons, detail, actor=request.user, restrict=restrict)
                                 transaction.on_commit(
                                     lambda record=record:
                                     cancel_approval_reminders(
@@ -1816,7 +1815,7 @@ def birthboard_approve(request):
                             else:
                                 reasons = reject_form.cleaned_data['reasons']
                                 detail = reject_form.cleaned_data['detail']
-                                _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                                _reject_record_by_admin(record, reasons, detail, actor=request.user, restrict=restrict)
                                 transaction.on_commit(
                                     lambda record=record:
                                     cancel_approval_reminders(
@@ -1838,7 +1837,7 @@ def birthboard_approve(request):
                     else:
                         reasons = reject_form.cleaned_data['reasons']
                         detail = reject_form.cleaned_data['detail']
-                        _reject_record_by_admin(record, reasons, detail, actor=request.user)
+                        _reject_record_by_admin(record, reasons, detail, actor=request.user, restrict=restrict)
                         message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
         except (BirthboardRecord.DoesNotExist, TypeError, ValueError):
             message = "未找到该记录。"
