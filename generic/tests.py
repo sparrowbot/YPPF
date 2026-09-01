@@ -11,7 +11,8 @@ from utils.http.utils import safe_local_redirect_target
 
 class SafeLocalRedirectTargetTestCase(SimpleTestCase):
     def setUp(self):
-        self.request = RequestFactory().get("/", HTTP_HOST="testserver")
+        self.factory = RequestFactory()
+        self.request = self.factory.get("/", HTTP_HOST="testserver")
 
     def test_accepts_local_paths(self):
         for target in ("/inside?x=1", "/inside#fragment"):
@@ -27,6 +28,17 @@ class SafeLocalRedirectTargetTestCase(SimpleTestCase):
         self.assertEqual(
             safe_local_redirect_target(self.request, target, "/fallback/"),
             target,
+        )
+
+    def test_secure_request_rejects_absolute_http_downgrade(self):
+        base = GLOBAL_CONFIG.base_url.rstrip('/')
+        if not base.startswith('http://'):
+            self.skipTest('configured site origin is already HTTPS')
+        request = self.factory.get('/', secure=True)
+        target = f'{base}/inside'
+        self.assertEqual(
+            safe_local_redirect_target(request, target, '/fallback/'),
+            '/fallback/',
         )
 
     def test_rejects_unsafe_or_ambiguous_targets(self):

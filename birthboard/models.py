@@ -50,6 +50,10 @@ class BirthboardRecord(models.Model):
     first_approved_at = models.DateTimeField(null=True, blank=True, verbose_name='一审时间')
     second_approver = models.ForeignKey(User, null=True, blank=True, related_name='birthboard_second_approved', on_delete=models.SET_NULL, verbose_name='二审人')
     second_approved_at = models.DateTimeField(null=True, blank=True, verbose_name='二审时间')
+    display_takedown_pending = models.BooleanField(
+        default=False,
+        verbose_name='等待从投放屏下架',
+    )
 
 
 class ChangeRecord(models.Model):
@@ -162,6 +166,11 @@ class BirthboardContract(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='birthboard_contract')
     signed = models.BooleanField('已签署', default=False)
     signed_at = models.DateTimeField('签署时间', null=True, blank=True)
+    restricted_until = models.DateTimeField(
+        '限制参与至',
+        null=True,
+        blank=True,
+    )
 
     def __str__(self):
         return f"{self.user.username} contract={'✓' if self.signed else '✗'}"
@@ -179,7 +188,9 @@ class BirthboardConfirmSeen(models.Model):
     @classmethod
     def get_seen_dt(cls, user, tab: str):
         """获取用户某tab的最后查看时间，无记录则返回epoch"""
-        obj, _ = cls.objects.get_or_create(user=user)
+        obj = cls.objects.filter(user=user).first()
+        if obj is None:
+            return datetime.fromtimestamp(0)
         return getattr(obj, f'{tab}_seen', datetime.fromtimestamp(0))
 
     @classmethod

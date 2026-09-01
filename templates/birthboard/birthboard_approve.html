@@ -73,9 +73,9 @@
             <div class="card-body">
                 {% if record.image %}
                     <div class="approval-image-row">
-                        <img src="{{ record.image.url }}" alt="祝福图片 1" class="img-fluid">
-                        <img src="{{ record.image.url }}" alt="祝福图片 2" class="img-fluid">
-                        <img src="{{ record.image.url }}" alt="祝福图片 3" class="img-fluid">
+                        <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片 1" class="img-fluid">
+                        <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片 2" class="img-fluid">
+                        <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片 3" class="img-fluid">
                     </div>
                 {% endif %}
                 <div class="mb-2 approval-actions">
@@ -253,17 +253,22 @@
                 <div class="textN" style="width: 740px; text-align: center; line-height: 1.7; background-color: #00000010; margin-top: 9px; padding: 9px;">
                     <span class="textB" style="color: #888;">已撤销</span>
                 </div>
-                {% elif item.record_status == 'finished' %}
-                <div class="textN" style="width: 740px; text-align: center; line-height: 1.7; background-color: #00000010; margin-top: 9px; padding: 9px;">
-                    <span class="textB" style="color: #888;">投放已完成</span>
-                </div>
                 {% elif item.record_status == 'terminated' %}
                 <div class="textN" style="width: 740px; text-align: center; line-height: 1.7; background-color: #00000010; margin-top: 9px; padding: 9px;">
                     <span class="textB" style="color: #888;">已终止</span>
                 </div>
-                {% elif item.record_status == 'ready' or item.record_status == 'ongoing' %}
+                {% elif item.record_status == 'ready' or item.record_status == 'ongoing' or item.record_status == 'finished' %}
+                {% if item.record_status == 'finished' %}
+                <div class="textN" style="width: 740px; text-align: center; line-height: 1.7; background-color: #00000010; margin-top: 9px; padding: 9px;">
+                    <span class="textB" style="color: #888;">投放已完成，可追认违规</span>
+                </div>
+                {% endif %}
                 <div class="approve-btn-row">
-                    {% if birthboard_update_in_progress %}
+                    {% if not item.can_post_review_reject %}
+                        <button type="button" class="image-action-button" disabled title="此投放与你有关，无法审核">
+                            <span style="display:inline-block; padding:12px 28px; border:3px solid #999; border-radius:12px; color:#999; font-family:'MyfontB','MyfontE','Microsoft YaHei',sans-serif; font-size:20px;">与我有关，无法审核</span>
+                        </button>
+                    {% elif birthboard_update_in_progress %}
                         <button type="button" class="image-action-button" disabled title="同步中，无法操作">
                             <span style="display:inline-block; padding:12px 28px; border:3px solid #999; border-radius:12px; color:#999; font-family:'MyfontB','MyfontE','Microsoft YaHei',sans-serif; font-size:20px;">驳回</span>
                         </button>
@@ -314,7 +319,7 @@
                 </script>
                 {% elif item.record_status == 'waiting_approve' %}
                 <div class="approve-btn-row">
-                    {% if is_first and not item.first_approved %}
+                    {% if item.can_first_approve %}
                         <form method="post" style="display:inline;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="approve">
@@ -326,7 +331,7 @@
                         <button type="button" class="image-action-button" onclick="showRejectModal('{{ item.id }}')" title="驳回" aria-label="驳回">
                             <span style="display:inline-block; padding:12px 28px; border:3px solid #b90000; border-radius:12px; color:#b90000; font-family:'MyfontB','MyfontE','Microsoft YaHei',sans-serif; font-size:20px;">驳回</span>
                         </button>
-                    {% elif is_second and item.first_approved %}
+                    {% elif item.can_second_approve %}
                         <form method="post" style="display:inline;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="approve">

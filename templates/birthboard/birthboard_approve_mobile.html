@@ -181,7 +181,7 @@
 
         {% if record.image %}
         <div class="thumbs">
-            <img src="{{ record.image.url }}" alt="祝福图片" onclick="showFullscreen('{{ record.image.url }}')">
+            <img src="{% url 'birthboard_image' record.id 'image' %}" alt="祝福图片" onclick="showFullscreen('{% url 'birthboard_image' record.id 'image' %}')">
         </div>
         {% endif %}
 
@@ -265,18 +265,21 @@
                 </div>
             {% elif item.record_status == 'canceled' %}
                 <div class="item-meta st-gray">已撤销</div>
-            {% elif item.record_status == 'finished' %}
-                <div class="item-meta st-gray">投放已完成</div>
             {% elif item.record_status == 'terminated' %}
                 <div class="item-meta st-gray">已终止</div>
-            {% elif item.record_status == 'ready' or item.record_status == 'ongoing' %}
-                {% if birthboard_update_in_progress %}
+            {% elif item.record_status == 'ready' or item.record_status == 'ongoing' or item.record_status == 'finished' %}
+                {% if item.record_status == 'finished' %}
+                    <div class="item-meta st-gray">投放已完成，可追认违规</div>
+                {% endif %}
+                {% if not item.can_post_review_reject %}
+                    <button type="button" class="btn btn-disabled" disabled style="width:100%;margin-top:10px;">与我有关，无法审核</button>
+                {% elif birthboard_update_in_progress %}
                     <button type="button" class="btn btn-disabled" disabled style="width:100%;margin-top:10px;">同步中，无法操作</button>
                 {% else %}
                     <div class="btn-row"><button type="button" class="btn btn-reject" onclick="showRejectModal('{{ item.id }}')">驳回</button></div>
                 {% endif %}
             {% elif item.record_status == 'waiting_approve' %}
-                {% if is_first and not item.first_approved %}
+                {% if item.can_first_approve %}
                     <div class="btn-row">
                         <form method="post" style="flex:1;display:flex;">
                             {% csrf_token %}
@@ -286,7 +289,7 @@
                         </form>
                         <button type="button" class="btn btn-reject" onclick="showRejectModal('{{ item.id }}')">驳回</button>
                     </div>
-                {% elif is_second and item.first_approved %}
+                {% elif item.can_second_approve %}
                     <div class="btn-row">
                         <form method="post" style="flex:1;display:flex;">
                             {% csrf_token %}

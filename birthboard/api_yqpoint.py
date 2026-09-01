@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from app.utils import check_user_access
 from birthboard.models import BirthboardRecord
 from birthboard.utils import calculate_per_cost
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 @csrf_protect
 @login_required(redirect_field_name='origin')
+@check_user_access(redirect_url='/logout/')
 @require_POST
 def check_yqpoint(request):
     """
@@ -28,10 +30,23 @@ def check_yqpoint(request):
         record_id = data.get('record_id')
 
         per = None
+        if not request.user.is_person() or not request.user.active:
+            return JsonResponse(
+                {'ok': False, 'msg': 'permission denied'},
+                status=403,
+            )
+
         if record_id is not None:
             try:
                 record_id = int(record_id)
-                record = BirthboardRecord.objects.filter(id=record_id).only('per_cost').first()
+                record = (
+                    BirthboardRecord.objects.filter(
+                        id=record_id,
+                        participants__user=request.user,
+                    )
+                    .only('per_cost')
+                    .first()
+                )
                 if record:
                     per = int(record.per_cost)
             except (TypeError, ValueError):

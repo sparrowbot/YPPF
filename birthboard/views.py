@@ -1,15 +1,24 @@
 import json
+import mimetypes
 import os
+import secrets
 from datetime import datetime, timedelta
 import logging
 
 from django.db import transaction
-from django.db.models import Q, F, OuterRef, Subquery, DateTimeField
+from django.db.models import (
+    Q,
+    F,
+    OuterRef,
+    Subquery,
+    DateTimeField,
+    Prefetch,
+)
 from django.db.models.functions import Coalesce
 from django.core.files.images import get_image_dimensions
 from django.contrib import messages
 
-from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.csrf import csrf_protect
 from django.contrib.auth.decorators import login_required
 
@@ -30,9 +39,9 @@ from birthboard.models import (
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, HttpResponseForbidden, JsonResponse
 
-from birthboard.forms import BirthboardForm
+from birthboard.forms import BirthboardForm, BirthboardRejectForm
 from birthboard.utils import calculate_per_cost, generate_thumbnail
 
 User = get_user_model()
@@ -45,8 +54,7 @@ from functools import wraps
 
 from django.core.cache import cache
 
-from birthboard.web_controller import open_and_login, _run_update_cycle
-from birthboard.jobs import _get_abs_image_path
+from birthboard.jobs import attempt_pending_takedown
 from birthboard.notify import (
     notify_revoke,
     notify_refund,
@@ -59,9 +67,7 @@ from birthboard.reminder import (
     schedule_first_approval_reminders,
     schedule_second_approval_reminders,
 )
-from playwright.sync_api import sync_playwright
-
-from birthboard.config import CONFIG, shihannet
+from birthboard.config import CONFIG
 
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
 logger = logging.getLogger(__name__)
@@ -74,6 +80,7 @@ __all__ = [
     'birthboard_like_count',
     'birthboard_like_add',
     'birthboard_reminder_seen',
+    'birthboard_image',
     'time_now',
     'confirm_tab_count_api',
     'birthboard_confirm',
@@ -83,14 +90,25 @@ __all__ = [
 ]
 
 
+def _display_update_is_locked() -> bool:
+    """Fail closed when the external-display coordination lock is unknown."""
+    try:
+        return bool(cache.get(_BB_UPDATE_LOCK_KEY))
+    except Exception:
+        logger.exception('cannot verify birthboard display update lock')
+        return True
+
+
 def require_contract(view_func):
     """装饰器：要求用户已签署协议才能访问。"""
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect("birthboard_contract")
-        contract, _ = BirthboardContract.objects.get_or_create(user=request.user)
-        if not contract.signed:
+        if not request.user.is_person() or not request.user.active:
+            return HttpResponseForbidden('仅限状态正常的个人账号使用生日板。')
+        contract = BirthboardContract.objects.filter(user=request.user).first()
+        if contract is None or not contract.signed:
             return redirect("birthboard_contract")
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -103,18 +121,20 @@ def _handle_revoke(revoke_id: str, actor=None) -> str:
         - 'ok': 撤销请求已处理（含记录不存在）
         - 'locked': 因夜间同步窗口（23:45-24:00）被拒绝，调用方可据此提示刷新页面
         - 'forbidden': 调用者不是该投放的发起人或寿星，无权撤销
+        - 'conflict': 记录已不处于可撤销的 READY/ONGOING 状态
     """
     # 如果正在执行批量更新（夜间任务），拒绝冲突操作
-    try:
-        if cache.get(_BB_UPDATE_LOCK_KEY):
-            logger.info("_handle_revoke: update in progress, reject revoke %s", revoke_id)
-            return "locked"
-    except Exception:
-        # 忽略 cache 异常，继续执行以保持兼容性
-        pass
+    if _display_update_is_locked():
+        logger.info("_handle_revoke: update in progress, reject revoke %s", revoke_id)
+        return 'locked'
     try:
         with transaction.atomic():
             record = BirthboardRecord.objects.select_for_update().get(id=revoke_id)
+            # The nightly job can acquire the cache lock after the early
+            # check but before this row lock. Recheck after serialization so
+            # it cannot upload a record that this request is cancelling.
+            if _display_update_is_locked():
+                return 'locked'
             # 权限校验：仅发起人或寿星可撤销，避免他人按可猜测的记录 ID 取消
             # 别人的投放（含投放中，会触发从外部屏幕移除）。必须在行锁内校验。
             is_initiator = record.participants.filter(
@@ -122,8 +142,12 @@ def _handle_revoke(revoke_id: str, actor=None) -> str:
                 role=BirthboardParticipant.Role.SENDER,
                 is_initiator=True,
             ).exists()
+            is_receiver = record.participants.filter(
+                user=actor,
+                role=BirthboardParticipant.Role.RECEIVER,
+            ).exists()
             if actor is None or not (
-                is_initiator or record.receiver_username == actor.username
+                is_initiator or is_receiver
             ):
                 logger.warning(
                     "[birthboard.views] _handle_revoke: forbidden revoke_id=%s actor=%s",
@@ -131,56 +155,31 @@ def _handle_revoke(revoke_id: str, actor=None) -> str:
                     actor.username if actor else None,
                 )
                 return "forbidden"
+            if record.status not in {
+                BirthboardRecord.Status.READY,
+                BirthboardRecord.Status.ONGOING,
+            }:
+                return 'conflict'
             before_status = record.status
             record.status = record.Status.CANCELED
-            record.save(update_fields=["status"])
+            update_fields = ['status']
+            if before_status == BirthboardRecord.Status.ONGOING:
+                record.display_takedown_pending = True
+                update_fields.append('display_takedown_pending')
+            record.save(update_fields=update_fields)
             _log_record_change(record, actor=actor, action=ChangeRecord.Action.REVOKE, before_status=before_status, after_status=record.status, detail={"revoke_id": revoke_id})
-            transaction.on_commit(lambda: cancel_approval_reminders(record))
-            # 如果原状态为 ONGOING，调用外部的 update_list(image_path)
-            try:
-                if before_status == BirthboardRecord.Status.ONGOING:
-                    img_path = _get_abs_image_path(record.image)
-                    if img_path:
-                        try:
-                            url = shihannet.url
-                            username = shihannet.username
-                            password = shihannet.password
-                            with sync_playwright() as p:
-                                browser = None
-                                page = None
-                                try:
-                                    browser, page = open_and_login(
-                                        playwright=p,
-                                        url=url,
-                                        username=username,
-                                        password=password,
-                                    )
-
-                                    browser, page, outcome = _run_update_cycle(
-                                        playwright=p,
-                                        browser=browser,
-                                        page=page,
-                                        url=url,
-                                        username=username,
-                                        password=password,
-                                        up_image_name=[],
-                                        del_image_name=[img_path],
-                                    )
-                                finally:
-                                    if browser is not None:
-                                        try:
-                                            browser.close()
-                                        except Exception:
-                                            pass
-                        except Exception:
-                            logger.exception("[birthboard.jobs] nightly_update_2345: update_list loop failed")
-
-            except Exception:
-                # 忽略任何与补充逻辑相关的异常，确保撤销流程不被中断
-                pass
-        notify_revoke(record)
+            transaction.on_commit(
+                lambda record=record: cancel_approval_reminders(record)
+            )
+            transaction.on_commit(lambda record=record: notify_revoke(record))
+            if record.display_takedown_pending:
+                transaction.on_commit(
+                    lambda record_id=record.id: attempt_pending_takedown(
+                        record_id
+                    )
+                )
         return "ok"
-    except BirthboardRecord.DoesNotExist:
+    except (BirthboardRecord.DoesNotExist, TypeError, ValueError):
         return "ok"
 
 
@@ -230,6 +229,22 @@ STATUS_CLASS = {
 }
 
 
+def _with_activity_relations(records):
+    """Prefetch the bounded relations rendered for each activity card."""
+    return records.prefetch_related(
+        Prefetch(
+            'participants',
+            queryset=BirthboardParticipant.objects.select_related('user'),
+            to_attr='birthboard_participant_rows',
+        ),
+        Prefetch(
+            'change_records',
+            queryset=ChangeRecord.objects.order_by('-created_at', '-id'),
+            to_attr='birthboard_change_rows',
+        ),
+    )
+
+
 def _build_activity_base(record: BirthboardRecord):
     rejected_reasons, rejected_detail = _get_rejected_info(record)
     if record.mode == 1:
@@ -240,7 +255,14 @@ def _build_activity_base(record: BirthboardRecord):
         end_date = None
     status_key = str(record.status)
     # 取最新一条变更记录，构建状态过渡显示
-    latest_change = record.change_records.order_by('-created_at').first()
+    prefetched_changes = getattr(record, 'birthboard_change_rows', None)
+    if prefetched_changes is not None:
+        latest_change = prefetched_changes[0] if prefetched_changes else None
+    else:
+        latest_change = record.change_records.order_by(
+            '-created_at',
+            '-id',
+        ).first()
     if latest_change and latest_change.before_status:
         before_display = STATUS_DISPLAY.get(latest_change.before_status, latest_change.before_status)
         after_display = STATUS_DISPLAY.get(latest_change.after_status, latest_change.after_status)
@@ -266,8 +288,20 @@ def _build_activity_base(record: BirthboardRecord):
         'id': record.id,
         'date': record.date,
         'end_date': end_date,
-        'image': record.image.url if record.image else '',
-        'thumbnail_url': record.thumbnail.url if record.thumbnail else (record.image.url if record.image else ''),
+        'image': (
+            reverse('birthboard_image', args=[record.id, 'image'])
+            if record.image else ''
+        ),
+        'thumbnail_url': (
+            reverse(
+                'birthboard_image',
+                args=[
+                    record.id,
+                    'thumbnail' if record.thumbnail else 'image',
+                ],
+            )
+            if record.image else ''
+        ),
         'receiver_name': record.receiver_name,
         'receiver_username': record.receiver_username,
         'per_cost': record.per_cost,
@@ -303,16 +337,67 @@ def _deduct_and_mark_paid(user, part: BirthboardParticipant, amount: int, set_ac
 
 
 def _is_user_related_to_record(record: BirthboardRecord, user) -> bool:
-    is_receiver = record.receiver_username == user.username
-    is_participant = BirthboardParticipant.objects.filter(
+    prefetched_participants = getattr(
+        record,
+        'birthboard_participant_rows',
+        None,
+    )
+    if prefetched_participants is not None:
+        return any(
+            participant.user_id == user.id
+            for participant in prefetched_participants
+        )
+    return BirthboardParticipant.objects.filter(
         record=record,
         user=user,
     ).exists()
-    return is_receiver or is_participant
 
 
+def _restrict_initiator_after_display_violation(
+    record: BirthboardRecord,
+) -> None:
+    """Apply the contract's one-month restriction to the initiator."""
+    initiator = (
+        record.participants.filter(
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=True,
+        )
+        .select_related('user')
+        .first()
+    )
+    if initiator is None:
+        logger.error(
+            'birthboard display violation has no initiator record_id=%s',
+            record.id,
+        )
+        return
+    contract, _ = BirthboardContract.objects.select_for_update().get_or_create(
+        user=initiator.user,
+    )
+    restricted_until = datetime.now() + timedelta(days=30)
+    if (
+        contract.restricted_until is None
+        or contract.restricted_until < restricted_until
+    ):
+        contract.restricted_until = restricted_until
+        contract.save(update_fields=['restricted_until'])
+
+
+@transaction.atomic
 def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, actor=None) -> None:
+    """Reject a record and enforce refund/takedown/restriction policy."""
+    record = BirthboardRecord.objects.select_for_update().get(pk=record.pk)
+    if record.status not in {
+        BirthboardRecord.Status.WAITING_APPROVE,
+        BirthboardRecord.Status.READY,
+        BirthboardRecord.Status.ONGOING,
+        BirthboardRecord.Status.FINISHED,
+    }:
+        raise ValueError('record is not in a reviewable state')
     before_status = record.status
+    paid_users = {}
+    if before_status == BirthboardRecord.Status.WAITING_APPROVE:
+        paid_users, _ = _refund_paid_participants(record)
     BirthboardRejectedIssue.objects.update_or_create(
         record=record,
         defaults={
@@ -321,7 +406,16 @@ def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, acto
         },
     )
     record.status = BirthboardRecord.Status.TERMINATED_BY_ADMIN
-    record.save(update_fields=["status"])
+    update_fields = ['status']
+    if before_status == BirthboardRecord.Status.ONGOING:
+        record.display_takedown_pending = True
+        update_fields.append('display_takedown_pending')
+    record.save(update_fields=update_fields)
+    if before_status in {
+        BirthboardRecord.Status.ONGOING,
+        BirthboardRecord.Status.FINISHED,
+    }:
+        _restrict_initiator_after_display_violation(record)
     _log_record_change(
         record,
         actor=actor,
@@ -330,13 +424,23 @@ def _reject_record_by_admin(record: BirthboardRecord, reasons, detail: str, acto
         after_status=record.status,
         detail={"reasons": reasons, "detail": detail, "scope": "admin"},
     )
+    if paid_users:
+        transaction.on_commit(
+            lambda record=record, paid_users=paid_users: notify_refund(
+                record,
+                paid_users,
+            )
+        )
+    if record.display_takedown_pending:
+        transaction.on_commit(
+            lambda record_id=record.id: attempt_pending_takedown(record_id)
+        )
 
 
-def _refund_paid_participants_and_terminate(record: BirthboardRecord, actor=None, action: str = ChangeRecord.Action.REFUND, detail=None) -> None:
-    """退还活动中所有已扣款参与者，并将活动置为中止。"""
+def _refund_paid_participants(record: BirthboardRecord):
+    """Refund locked paid sender rows without changing the record status."""
     from generic.models import YQPointRecord
 
-    before_status = record.status
     paid_parts = list(
         BirthboardParticipant.objects.select_for_update().filter(
             record=record,
@@ -344,28 +448,54 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord, actor=None
             role=BirthboardParticipant.Role.SENDER,
         )
     )
-    paid_users = {}
-    if paid_parts:
-        paid_user_ids = [p.user_id for p in paid_parts]
-        paid_users = {
-            u.id: u for u in User.objects.select_for_update().filter(id__in=paid_user_ids)
-        }
-        now = datetime.now()
-        for paid_part in paid_parts:
-            paid_user = paid_users.get(paid_part.user_id)
-            if paid_user is None:
-                continue
-            paid_user.YQpoint += record.per_cost
-            paid_user.save(update_fields=["YQpoint"])
-            YQPointRecord.objects.create(
-                user=paid_user,
-                delta=record.per_cost,
-                source="birthboard_refund",
-                source_type=getattr(YQPointRecord.SourceType, 'BIRTHBOARD', 0),
-            )
-            paid_part.status = BirthboardParticipant.Status.REFUNDED
-            paid_part.action_time = now
-            paid_part.save(update_fields=["status", "action_time"])
+    paid_user_ids = [participant.user_id for participant in paid_parts]
+    paid_users = {
+        user.id: user
+        for user in User.objects.select_for_update().filter(
+            id__in=paid_user_ids
+        )
+    }
+    now = datetime.now()
+    for paid_part in paid_parts:
+        paid_user = paid_users.get(paid_part.user_id)
+        if paid_user is None:
+            continue
+        refund_amount = paid_part.cost
+        paid_user.YQpoint += refund_amount
+        paid_user.save(update_fields=['YQpoint'])
+        YQPointRecord.objects.create(
+            user=paid_user,
+            delta=refund_amount,
+            source='birthboard_refund',
+            source_type=getattr(
+                YQPointRecord.SourceType,
+                'BIRTHBOARD',
+                0,
+            ),
+        )
+        paid_part.status = BirthboardParticipant.Status.REFUNDED
+        paid_part.action_time = now
+        paid_part.save(update_fields=['status', 'action_time'])
+    return paid_users, paid_parts
+
+
+@transaction.atomic
+def _refund_paid_participants_and_terminate(
+    record: BirthboardRecord,
+    actor=None,
+    action: str = ChangeRecord.Action.REFUND,
+    detail=None,
+) -> None:
+    """退还活动中所有已扣款参与者，并将活动置为中止。"""
+    record = BirthboardRecord.objects.select_for_update().get(pk=record.pk)
+    if record.status not in {
+        BirthboardRecord.Status.WAITING_CONFIRM,
+        BirthboardRecord.Status.WAITING_RECEIVER,
+        BirthboardRecord.Status.WAITING_APPROVE,
+    }:
+        raise ValueError('record is not in a refundable waiting state')
+    before_status = record.status
+    paid_users, paid_parts = _refund_paid_participants(record)
 
     record.status = record.Status.TERMINATED
     record.save(update_fields=["status"])
@@ -466,22 +596,28 @@ def _is_birthboard_date_allowed(submit_date, rule):
 
 
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_http_methods(["GET"])
 def birthboard_contract(request):
     """协议签署页面（已签署时按钮显示“回到灯牌”）"""
-    contract, _ = BirthboardContract.objects.get_or_create(user=request.user)
+    if not request.user.is_person() or not request.user.active:
+        return HttpResponseForbidden('仅限状态正常的个人账号签署生日板协议。')
+    contract = BirthboardContract.objects.filter(user=request.user).first()
     return render(
         request,
         "birthboard/contract.html",
-        {"contract_signed": contract.signed},
+        {"contract_signed": bool(contract and contract.signed)},
     )
 
 
 @csrf_protect
 @login_required(redirect_field_name="origin")
+@check_user_access(redirect_url="/logout/")
 @require_http_methods(["POST"])
 def birthboard_sign_contract(request):
     """签署协议 API：将当前用户 contract 设为 True"""
+    if not request.user.is_person() or not request.user.active:
+        return JsonResponse({'ok': False}, status=403)
     contract, _ = BirthboardContract.objects.get_or_create(user=request.user)
     contract.signed = True
     contract.signed_at = datetime.now()
@@ -494,8 +630,12 @@ def birthboard_sign_contract(request):
 @require_http_methods(["GET"])
 def birthboard_like_count(request):
     """制作名单累计点赞量查询接口：返回当前累计值。"""
-    like, _ = BirthboardLike.objects.get_or_create(pk=1)
-    return JsonResponse({"count": like.count})
+    count = (
+        BirthboardLike.objects.filter(pk=1)
+        .values_list('count', flat=True)
+        .first()
+    )
+    return JsonResponse({'count': count or 0})
 
 
 @csrf_protect
@@ -540,37 +680,50 @@ def time_now(request):
     return JsonResponse({"now": iso})
 
 
-def _generate_birthboard_image_filename(image, date, submit_time=None) -> str:
-    """生成投放图片文件名：YYYYMMDD_YYYYMMDDHHMM_计数器_原文件名。
+@login_required(redirect_field_name='origin')
+@check_user_access(redirect_url='/logout/')
+@require_contract
+@require_http_methods(['GET'])
+def birthboard_image(request, record_id: int, kind: str):
+    """Serve a poster only to its participants or active reviewers."""
+    record = BirthboardRecord.objects.filter(pk=record_id).first()
+    if record is None or kind not in {'image', 'thumbnail'}:
+        raise Http404
+    is_reviewer = (
+        BirthboardApprover.objects.filter(
+            user=request.user,
+            is_active=True,
+        ).exists()
+        or BirthboardSecondApprover.objects.filter(
+            user=request.user,
+            is_active=True,
+        ).exists()
+    )
+    if not is_reviewer and not _is_user_related_to_record(
+        record,
+        request.user,
+    ):
+        # Do not reveal whether a caller-supplied record ID exists.
+        raise Http404
+    image_field = record.thumbnail if kind == 'thumbnail' else record.image
+    if not image_field:
+        raise Http404
+    content_type = mimetypes.guess_type(image_field.name)[0] or 'image/jpeg'
+    image_field.open('rb')
+    response = FileResponse(
+        image_field,
+        content_type=content_type,
+        filename=os.path.basename(image_field.name),
+    )
+    response['Cache-Control'] = 'private, no-store'
+    return response
 
-    同一分钟内可能有多次提交（含并发），通过查询库中同前缀记录的最大序号
-    并递增，避免同名覆盖；再用存储层存在性检查兜底递增。返回文件名不含
-    ``birthboard_images/`` 前缀，Django 保存时自动加上 upload_to 前缀。
-    创建为低频操作，该防护对顺序提交完全有效，对极端并发只能降低碰撞概率。
-    """
-    original_filename = image.name
-    file_ext = os.path.splitext(original_filename)[1]
-    original_name_without_ext = os.path.splitext(original_filename)[0]
+
+def _generate_birthboard_image_filename(image, date, submit_time=None) -> str:
+    """Generate an unpredictable storage name without exposing the original."""
+    file_ext = os.path.splitext(image.name)[1].lower()
     date_str = date.strftime('%Y%m%d')
-    submit_time_str = (submit_time or datetime.now()).strftime('%Y%m%d%H%M')
-    base_prefix = f'{date_str}_{submit_time_str}_{original_name_without_ext}'
-    stored_prefix = f'birthboard_images/{base_prefix}'
-    used_counter = 0
-    for img_name in BirthboardRecord.objects.filter(
-        image__startswith=stored_prefix
-    ).values_list('image', flat=True):
-        tail = img_name[len(stored_prefix):]
-        if tail == file_ext:
-            used_counter = max(used_counter, 0)
-        elif tail.startswith('_') and tail.endswith(file_ext):
-            num_part = tail[1:-len(file_ext)]
-            if num_part.isdigit():
-                used_counter = max(used_counter, int(num_part))
-    counter = used_counter + 1
-    from django.core.files.storage import default_storage
-    while default_storage.exists(f'birthboard_images/{base_prefix}_{counter}{file_ext}'):
-        counter += 1
-    return f'{base_prefix}_{counter}{file_ext}'
+    return f'{date_str}_{secrets.token_hex(16)}{file_ext}'
 
 
 @csrf_protect
@@ -579,12 +732,22 @@ def _generate_birthboard_image_filename(image, date, submit_time=None) -> str:
 @require_contract
 @require_http_methods(["GET", "POST"])
 def birthboard(request):
-    users = User.objects.all()
+    contract = BirthboardContract.objects.get(user=request.user)
+    if (
+        contract.restricted_until is not None
+        and contract.restricted_until > datetime.now()
+    ):
+        return HttpResponseForbidden(
+            f'因投放后违规，生日板发起权限限制至 '
+            f'{contract.restricted_until:%Y-%m-%d %H:%M}。'
+        )
+    users = User.objects.filter(
+        utype__in=User.Type.Persons(),
+        active=True,
+    )
     from generic.utils import to_search_indices
     user_infos = to_search_indices(users, active=True)
-    # 获取所有用户元气值
-    yqpoints = {u.username: u.YQpoint for u in users}
-    json_context = {'user_infos': user_infos, 'yqpoints': yqpoints}
+    json_context = {'user_infos': user_infos}
     today_entry_reminders = _get_today_entry_reminders(request.user)
     birthboard_date_rule = _get_birthboard_date_rule()
     birthboard_date_rule_json = _serialize_birthboard_date_rule(birthboard_date_rule)
@@ -596,7 +759,10 @@ def birthboard(request):
     # 海报"模版下载"链接（配置 birthboard.template_download_url）
     template_download_url = CONFIG.template_download_url
 
-    initial = request.session.pop('birthboard_resubmit_initial', None)
+    if request.method == 'POST':
+        initial = request.session.pop('birthboard_resubmit_initial', None)
+    else:
+        initial = request.session.get('birthboard_resubmit_initial')
 
     if request.method == "POST":
         # If client provided receiver_pk (hidden field), map it to 'receiver' before form binding.
@@ -605,7 +771,7 @@ def birthboard(request):
             post_data = request.POST.copy()
             # set 'receiver' to the pk so BirthboardForm.ModelChoiceField can resolve it
             post_data['receiver'] = post_data.get('receiver_pk')
-        form = BirthboardForm(post_data, request.FILES)
+        form = BirthboardForm(post_data, request.FILES, user=request.user)
         if form.is_valid():
             receiver = form.cleaned_data['receiver']
             senders = form.cleaned_data['senders']
@@ -633,8 +799,7 @@ def birthboard(request):
                 current_user_id = str(request.user.username)
                 return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "template_download_url": template_download_url, "current_user_id": current_user_id, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
             # 校验送出者元气值：按提交人数计算人均价，避免误按总价校验
-            posted_sender_ids = set(request.POST.getlist('senders'))
-            sender_count = max(len(posted_sender_ids), len(senders), 1)
+            sender_count = max(senders.count(), 1)
             per = calculate_per_cost(mode, sender_count)
             # 实时查询数据库余额：仅校验当前登录用户本人
             current_user = request.user
@@ -663,7 +828,7 @@ def birthboard(request):
                     status = BirthboardRecord.Status.WAITING_RECEIVER if len(senders) == 1 and senders[0] == request.user else BirthboardRecord.Status.WAITING_CONFIRM
                     record = BirthboardRecord.objects.create(
                         receiver_username=receiver.username,
-                        receiver_name=getattr(receiver, 'naturalperson', getattr(receiver, 'name', receiver.username)),
+                        receiver_name=receiver.name or receiver.username,
                         date=date,
                         mode=mode,
                         per_cost=per,
@@ -730,17 +895,21 @@ def birthboard(request):
                     )
                 for sender in invited_senders:
                     notify_invite_sender(record, sender, initiator_name, per)
-            except Exception as e:
-                messages.error(request, f"记录创建失败：{e}")
+            except Exception:
+                logger.exception(
+                    'birthboard record creation failed actor_id=%s',
+                    request.user.pk,
+                )
+                messages.error(request, '记录创建失败，请稍后重试。')
                 return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "template_download_url": template_download_url, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
             return redirect("birthboard_confirm")
         else:
             return render(request, "birthboard/birthboard.html", {"form": form, "users": users, "json_context": json_context, "contact_email": contact_email, "contributor_orgs": contributor_orgs, "template_download_url": template_download_url, "confirm_tab_total_count": _get_confirm_tab_total_count(request, request.user), "today_entry_reminders": today_entry_reminders, "birthboard_date_rule": birthboard_date_rule_json})
     else:
         if initial:
-            form = BirthboardForm(initial=initial)
+            form = BirthboardForm(initial=initial, user=request.user)
         else:
-            form = BirthboardForm()
+            form = BirthboardForm(user=request.user)
         return render(request, "birthboard/birthboard.html", {
             "form": form,
             "users": users,
@@ -757,14 +926,29 @@ def birthboard(request):
 def _build_activity_list(records, current_user, view_type: str):
     activity_list = []
     for record in records:
-        senders_part = record.participants.filter(role=BirthboardParticipant.Role.SENDER)
+        participants = getattr(record, 'birthboard_participant_rows', None)
+        if participants is None:
+            participants = list(
+                record.participants.select_related('user').all()
+            )
+        senders_part = [
+            participant
+            for participant in participants
+            if participant.role == BirthboardParticipant.Role.SENDER
+        ]
         base = _build_activity_base(record)
 
         if view_type == "received":
-            receiver_part = record.participants.filter(
-                role=BirthboardParticipant.Role.RECEIVER,
-                user=current_user,
-            ).first()
+            receiver_part = next(
+                (
+                    participant
+                    for participant in participants
+                    if participant.role
+                    == BirthboardParticipant.Role.RECEIVER
+                    and participant.user_id == current_user.id
+                ),
+                None,
+            )
             receiver_status = receiver_part.status if receiver_part else None
             if record.status == record.Status.TERMINATED and receiver_status == BirthboardParticipant.Status.WAIT:
                 continue
@@ -835,7 +1019,9 @@ def _build_participation_activity_list(current_user):
     records = BirthboardRecord.objects.filter(
         id__in=sender_participations.values_list('record_id', flat=True)
     ).exclude(status__in=excluded_statuses)
-    records = _order_records_by_last_change(records)[:100]
+    records = _with_activity_relations(
+        _order_records_by_last_change(records)[:100]
+    )
     return _build_activity_list(records, current_user, "participation")
 
 
@@ -846,8 +1032,14 @@ def _build_received_activity_list(current_user):
         BirthboardRecord.Status.READY,
         BirthboardRecord.Status.ONGOING,
     ]
-    records = BirthboardRecord.objects.filter(receiver_username=current_user.username, status__in=valid_status)
-    records = _order_records_by_last_change(records)[:100]
+    records = BirthboardRecord.objects.filter(
+        participants__user=current_user,
+        participants__role=BirthboardParticipant.Role.RECEIVER,
+        status__in=valid_status,
+    )
+    records = _with_activity_relations(
+        _order_records_by_last_change(records)[:100]
+    )
     return _build_activity_list(records, current_user, "received")
 
 
@@ -871,14 +1063,17 @@ def _build_finished_activity_list(current_user):
     
     # 作为receiver的投放
     receiver_records = BirthboardRecord.objects.filter(
-        receiver_username=current_user.username,
+        participants__user=current_user,
+        participants__role=BirthboardParticipant.Role.RECEIVER,
         status__in=finished_statuses
     )
     
     # 合并两个querysets
     all_records = sender_records | receiver_records
     all_records = all_records.distinct()
-    all_records = _order_records_by_last_change(all_records)[:200]
+    all_records = _with_activity_relations(
+        _order_records_by_last_change(all_records)[:200]
+    )
     
     return _build_activity_list(all_records, current_user, "finished")
 
@@ -993,6 +1188,7 @@ def _get_confirm_tab_total_count(request, user) -> int:
 @login_required(redirect_field_name="origin")
 @check_user_access(redirect_url="/logout/")
 @require_contract
+@require_http_methods(['GET'])
 def confirm_tab_count_api(request):
     """返回确认页面三个tab的未读计数之和 (JSON)。"""
     count = _get_confirm_tab_total_count(request, request.user)
@@ -1003,21 +1199,12 @@ def confirm_tab_count_api(request):
 @login_required(redirect_field_name="origin")
 @check_user_access(redirect_url="/logout/")
 @require_contract
-@xframe_options_exempt
+@xframe_options_sameorigin
+@require_http_methods(['GET', 'POST'])
 def birthboard_confirm(request):
-    # 禁止直接通过网页访问，必须从 birthboard 页面进入（含 iframe）
-    if request.method == "GET":
-        referer = request.META.get('HTTP_REFERER', '')
-        if not referer:
-            return redirect('birthboard')
     requested_tab = request.GET.get("tab")
     active_tab = requested_tab if requested_tab in {"participation", "received", "finished"} else "participation"
-    clear_once_key = f"birthboard_confirm_clear_once_{request.user.id}"
-    if request.method == "GET" and request.GET.get("mark_seen") == "1" and active_tab in {"participation", "received", "finished"}:
-        request.session[clear_once_key] = active_tab
-        request.session.modified = True
-        return redirect(f"{reverse('birthboard_confirm')}?tab={active_tab}")
-    clear_seen = request.session.pop(clear_once_key, None) == active_tab
+    clear_seen = False
 
     message = None
     try:
@@ -1026,6 +1213,11 @@ def birthboard_confirm(request):
         birthboard_update_in_progress = False
     if request.method == "POST":
         tab = request.POST.get("tab", active_tab)
+        if request.POST.get('mark_seen') == '1':
+            if tab not in {'participation', 'received', 'finished'}:
+                return JsonResponse({'error': 'invalid tab'}, status=400)
+            BirthboardConfirmSeen.mark_seen(request.user, tab)
+            return redirect(f"{reverse('birthboard_confirm')}?tab={tab}")
         if tab == "received":
             record_id = request.POST.get("record_id")
             reject_id = request.POST.get("reject_id")
@@ -1037,7 +1229,9 @@ def birthboard_confirm(request):
                         # 并发安全：锁定记录行，且只有"等待寿星确认"阶段允许确认，
                         # 避免与撤销/中止/驳回并发时把已终止记录改回待审批状态。
                         record = BirthboardRecord.objects.select_for_update().get(
-                            id=record_id, receiver_username=request.user.username
+                            id=record_id,
+                            participants__user=request.user,
+                            participants__role=BirthboardParticipant.Role.RECEIVER,
                         )
                         receiver_part = record.participants.select_for_update().filter(
                             role=BirthboardParticipant.Role.RECEIVER,
@@ -1059,7 +1253,10 @@ def birthboard_confirm(request):
                             if all_senders_paid:
                                 record.status = record.Status.WAITING_APPROVE
                                 record.save(update_fields=["status"])
-                                schedule_first_approval_reminders(record)
+                                transaction.on_commit(
+                                    lambda record=record:
+                                    schedule_first_approval_reminders(record)
+                                )
                             _log_record_change(
                                 record,
                                 actor=request.user,
@@ -1079,12 +1276,22 @@ def birthboard_confirm(request):
             elif reject_id:
                 try:
                     with transaction.atomic():
-                        record = BirthboardRecord.objects.select_for_update().get(id=reject_id, receiver_username=request.user.username)
+                        record = BirthboardRecord.objects.select_for_update().get(
+                            id=reject_id,
+                            participants__user=request.user,
+                            participants__role=BirthboardParticipant.Role.RECEIVER,
+                        )
                         receiver_part = record.participants.select_for_update().filter(
                             role=BirthboardParticipant.Role.RECEIVER,
                             user=request.user,
                         ).first()
-                        if receiver_part and receiver_part.status == BirthboardParticipant.Status.WAIT:
+                        if (
+                            receiver_part
+                            and receiver_part.status
+                            == BirthboardParticipant.Status.WAIT
+                            and record.status
+                            == BirthboardRecord.Status.WAITING_RECEIVER
+                        ):
                             receiver_part.status = BirthboardParticipant.Status.REJECTED
                             receiver_part.action_time = datetime.now()
                             receiver_part.save(update_fields=["status", "action_time"])
@@ -1097,6 +1304,11 @@ def birthboard_confirm(request):
                     return redirect(f"{reverse('birthboard_confirm')}?tab=received&error=concurrency")
                 if revoke_result == "forbidden":
                     return redirect(f"{reverse('birthboard_confirm')}?tab=received&error=forbidden")
+                if revoke_result == 'conflict':
+                    return redirect(
+                        f"{reverse('birthboard_confirm')}"
+                        '?tab=received&error=concurrency'
+                    )
             return redirect(f"{reverse('birthboard_confirm')}?tab=received")
 
         record_id = request.POST.get("record_id")
@@ -1110,8 +1322,14 @@ def birthboard_confirm(request):
                 initiator_part = record.participants.filter(role=BirthboardParticipant.Role.SENDER, is_initiator=True).first()
                 if initiator_part and initiator_part.user == request.user:
                     request.session['birthboard_resubmit_initial'] = {
-                        'receiver': record.receiver_username,
-                        'senders': [p.user.username for p in record.participants.filter(role=BirthboardParticipant.Role.SENDER)],
+                        'receiver': record.participants.filter(
+                            role=BirthboardParticipant.Role.RECEIVER,
+                        ).values_list('user_id', flat=True).first(),
+                        'senders': list(
+                            record.participants.filter(
+                                role=BirthboardParticipant.Role.SENDER,
+                            ).values_list('user_id', flat=True)
+                        ),
                         'date': str(record.date),
                         'mode': record.mode,
                         'is_anonymous': record.is_anonymous,
@@ -1132,6 +1350,14 @@ def birthboard_confirm(request):
                     )
                     if record.status != record.Status.WAITING_CONFIRM:
                         return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=concurrency")
+                    if part.status not in {
+                        BirthboardParticipant.Status.WAIT,
+                        BirthboardParticipant.Status.PAID,
+                    }:
+                        return redirect(
+                            f"{reverse('birthboard_confirm')}"
+                            '?tab=participation&error=concurrency'
+                        )
                     paid_now = False
                     if part.status != BirthboardParticipant.Status.PAID:
                         if not _deduct_and_mark_paid(request.user, part, record.per_cost):
@@ -1159,7 +1385,10 @@ def birthboard_confirm(request):
                                 record, request.user.username, all_paid
                             )
                         )
-            except BirthboardRecord.DoesNotExist:
+            except (
+                BirthboardRecord.DoesNotExist,
+                BirthboardParticipant.DoesNotExist,
+            ):
                 pass
         elif reject_id:
             try:
@@ -1170,11 +1399,23 @@ def birthboard_confirm(request):
                         user=request.user,
                         role=BirthboardParticipant.Role.SENDER,
                     )
+                    if (
+                        record.status
+                        != BirthboardRecord.Status.WAITING_CONFIRM
+                        or part.status != BirthboardParticipant.Status.WAIT
+                    ):
+                        return redirect(
+                            f"{reverse('birthboard_confirm')}"
+                            '?tab=participation&error=concurrency'
+                        )
                     part.status = BirthboardParticipant.Status.REJECTED
                     part.action_time = datetime.now()
                     part.save(update_fields=["status", "action_time"])
                     _refund_paid_participants_and_terminate(record, actor=request.user, action=ChangeRecord.Action.REJECT, detail={"scope": "sender"})
-            except BirthboardRecord.DoesNotExist:
+            except (
+                BirthboardRecord.DoesNotExist,
+                BirthboardParticipant.DoesNotExist,
+            ):
                 pass
         elif revoke_id:
             revoke_result = _handle_revoke(revoke_id, actor=request.user)
@@ -1182,25 +1423,55 @@ def birthboard_confirm(request):
                 return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=concurrency")
             if revoke_result == "forbidden":
                 return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=forbidden")
+            if revoke_result == 'conflict':
+                return redirect(
+                    f"{reverse('birthboard_confirm')}"
+                    '?tab=participation&error=concurrency'
+                )
         elif abort_id:
             # 并发安全：夜间同步窗口（23:45-24:00）内禁止中止退款，与撤销分支保持一致。
-            try:
-                if cache.get(_BB_UPDATE_LOCK_KEY):
-                    return redirect(f"{reverse('birthboard_confirm')}?tab=participation&error=concurrency")
-            except Exception:
-                # 忽略 cache 异常，继续执行以保持兼容性
-                pass
+            if _display_update_is_locked():
+                return redirect(
+                    f"{reverse('birthboard_confirm')}"
+                    '?tab=participation&error=concurrency'
+                )
+            is_receiver_abort = False
             try:
                 with transaction.atomic():
                     record = BirthboardRecord.objects.select_for_update().get(id=abort_id)
+                    if _display_update_is_locked():
+                        return redirect(
+                            f"{reverse('birthboard_confirm')}"
+                            '?tab=participation&error=concurrency'
+                        )
                     # 发起人中止 或 被祝福者在等待初审时中止
                     is_initiator_abort = BirthboardParticipant.objects.filter(
                         record=record, user=request.user,
                         role=BirthboardParticipant.Role.SENDER, is_initiator=True,
                     ).exists()
-                    is_receiver_abort = (record.receiver_username == request.user.username
-                                         and record.status == record.Status.WAITING_APPROVE)
-                    if is_initiator_abort:
+                    is_receiver_abort = (
+                        record.participants.filter(
+                            user=request.user,
+                            role=BirthboardParticipant.Role.RECEIVER,
+                        ).exists()
+                        and record.status
+                        == BirthboardRecord.Status.WAITING_APPROVE
+                    )
+                    initiator_refundable_statuses = {
+                        BirthboardRecord.Status.WAITING_CONFIRM,
+                        BirthboardRecord.Status.WAITING_RECEIVER,
+                        BirthboardRecord.Status.WAITING_APPROVE,
+                    }
+                    can_initiator_abort = (
+                        is_initiator_abort
+                        and record.status in initiator_refundable_statuses
+                    )
+                    if not (can_initiator_abort or is_receiver_abort):
+                        return redirect(
+                            f"{reverse('birthboard_confirm')}"
+                            '?tab=participation&error=concurrency'
+                        )
+                    if can_initiator_abort:
                         _refund_paid_participants_and_terminate(record, actor=request.user, action=ChangeRecord.Action.ABORT, detail={"scope": "initiator_abort"})
                     elif is_receiver_abort:
                         _refund_paid_participants_and_terminate(record, actor=request.user, action=ChangeRecord.Action.ABORT, detail={"scope": "receiver_abort"})
@@ -1302,10 +1573,9 @@ def _build_approval_activity_list(current_user, is_first: bool, is_second: bool)
         waiting_q &= Q(first_approved=False)
 
     other_statuses = [s for s in manageable_statuses if s != BirthboardRecord.Status.WAITING_APPROVE]
-    records = (
+    records = _with_activity_relations(
         BirthboardRecord.objects.filter(waiting_q | Q(status__in=other_statuses))
         .select_related("first_approver", "second_approver")
-        .prefetch_related("participants__user", "change_records")
         .order_by("-created_at", "-id")
     )[:200]  # 最多展示最近 200 条，防止数据量过大
 
@@ -1314,7 +1584,23 @@ def _build_approval_activity_list(current_user, is_first: bool, is_second: bool)
         activity = _build_activity_base(record)
         activity["is_related"] = _is_user_related_to_record(record, current_user)
         activity["first_approved"] = record.first_approved
-        senders = list(record.participants.filter(role=BirthboardParticipant.Role.SENDER).select_related("user"))
+        activity['can_post_review_reject'] = not activity['is_related']
+        activity['can_first_approve'] = (
+            is_first
+            and not record.first_approved
+            and not activity['is_related']
+        )
+        activity['can_second_approve'] = (
+            is_second
+            and record.first_approved
+            and record.first_approver_id != current_user.id
+            and not activity['is_related']
+        )
+        senders = [
+            participant
+            for participant in record.birthboard_participant_rows
+            if participant.role == BirthboardParticipant.Role.SENDER
+        ]
         activity["sender_names"] = [p.user.get_full_name() or p.user.username for p in senders]
         initiator_part = next((p for p in senders if p.is_initiator), None)
         activity["initiator_name"] = initiator_part.user.get_full_name() or initiator_part.user.username if initiator_part else ""
@@ -1330,7 +1616,7 @@ def _build_approval_activity_list(current_user, is_first: bool, is_second: bool)
 
 
 def _get_next_birthboard_approval_activity(current_user, is_first: bool, is_second: bool):
-    records = (
+    records = _with_activity_relations(
         BirthboardRecord.objects.filter(status=BirthboardRecord.Status.WAITING_APPROVE)
         .order_by("-created_at", "-id")
     )
@@ -1342,7 +1628,11 @@ def _get_next_birthboard_approval_activity(current_user, is_first: bool, is_seco
     for record in records:
         if _is_user_related_to_record(record, current_user):
             continue
-        senders = list(record.participants.filter(role=BirthboardParticipant.Role.SENDER).select_related("user"))
+        senders = [
+            participant
+            for participant in record.birthboard_participant_rows
+            if participant.role == BirthboardParticipant.Role.SENDER
+        ]
         sender_names = [participant.user.get_full_name() or participant.user.username for participant in senders]
         initiator_part = next((participant for participant in senders if participant.is_initiator), None)
         initiator_name = ""
@@ -1355,7 +1645,11 @@ def _get_next_birthboard_approval_activity(current_user, is_first: bool, is_seco
                 "sender_names": sender_names,
                 "initiator_name": initiator_name,
             }
-        if is_second and record.first_approved:
+        if (
+            is_second
+            and record.first_approved
+            and record.first_approver_id != current_user.id
+        ):
             return {
                 "record": record,
                 "is_related": False,
@@ -1392,6 +1686,18 @@ def birthboard_approve(request):
         action = request.POST.get("action")  # 'approve' or 'reject'
         record_id = request.POST.get("record_id")
         revoke_id = request.POST.get("revoke_id")
+        if action not in {'approve', 'reject', None}:
+            return JsonResponse({'error': 'invalid action'}, status=400)
+        reject_form = None
+        if action == 'reject':
+            reject_form = BirthboardRejectForm(request.POST)
+            if not reject_form.is_valid():
+                return JsonResponse(
+                    {'error': 'invalid rejection reason'},
+                    status=400,
+                )
+            if _display_update_is_locked():
+                return redirect(f"{request.path}?error=concurrency")
         # 并发冲突标志：操作被夜间同步锁拒绝或已被其他管理员处理时置位，
         # 最终带 error=concurrency 重定向，前端弹窗提示"系统错误，请刷新"。
         error_concurrency = False
@@ -1407,7 +1713,9 @@ def birthboard_approve(request):
                 # 并发安全：在事务内锁定记录行，并在同一事务内完成全部状态检查与
                 # 审核/驳回变更，避免并发一审/二审读到旧状态后互相覆盖。
                 record = BirthboardRecord.objects.select_for_update().get(id=record_id)
-                if record.status == BirthboardRecord.Status.WAITING_APPROVE:
+                if action == 'reject' and _display_update_is_locked():
+                    error_concurrency = True
+                elif record.status == BirthboardRecord.Status.WAITING_APPROVE:
                     # 检查管理员是否与该投放有关
                     if _is_user_related_to_record(record, request.user):
                         message = "此投放活动与你有关，你不能参与审核。"
@@ -1422,8 +1730,17 @@ def birthboard_approve(request):
                                 record.first_approver = request.user
                                 record.first_approved_at = datetime.now()
                                 record.save(update_fields=["first_approved", "first_approver", "first_approved_at"])
-                                cancel_approval_reminders(record, stage='first')
-                                schedule_second_approval_reminders(record)
+                                transaction.on_commit(
+                                    lambda record=record:
+                                    cancel_approval_reminders(
+                                        record,
+                                        stage='first',
+                                    )
+                                )
+                                transaction.on_commit(
+                                    lambda record=record:
+                                    schedule_second_approval_reminders(record)
+                                )
                                 _log_record_change(
                                     record,
                                     actor=request.user,
@@ -1437,13 +1754,24 @@ def birthboard_approve(request):
                             if record.first_approved:
                                 error_concurrency = True
                             else:
-                                reasons = request.POST.getlist("reasons")
-                                detail = request.POST.get("detail", "")
+                                reasons = reject_form.cleaned_data['reasons']
+                                detail = reject_form.cleaned_data['detail']
                                 _reject_record_by_admin(record, reasons, detail, actor=request.user)
-                                cancel_approval_reminders(record, stage='first')
+                                transaction.on_commit(
+                                    lambda record=record:
+                                    cancel_approval_reminders(
+                                        record,
+                                        stage='first',
+                                    )
+                                )
                                 message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
                     # 二审操作
                     elif is_second and record.first_approved:
+                        if record.first_approver_id == request.user.id:
+                            return JsonResponse(
+                                {'error': '初审人与终审人必须不同'},
+                                status=403,
+                            )
                         if action == "approve":
                             if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
                                 error_concurrency = True
@@ -1453,8 +1781,11 @@ def birthboard_approve(request):
                                 try:
                                     update_in_progress = bool(cache.get(_BB_UPDATE_LOCK_KEY))
                                 except Exception:
-                                    # 忽略 cache 异常，继续执行以保持兼容性
-                                    update_in_progress = False
+                                    logger.exception(
+                                        'cannot verify display lock before '
+                                        'final approval'
+                                    )
+                                    update_in_progress = True
                                 if update_in_progress:
                                     error_concurrency = True
                                 else:
@@ -1463,7 +1794,13 @@ def birthboard_approve(request):
                                     record.second_approver = request.user
                                     record.second_approved_at = datetime.now()
                                     record.save(update_fields=["status", "second_approver", "second_approved_at"])
-                                    cancel_approval_reminders(record, stage='second')
+                                    transaction.on_commit(
+                                        lambda record=record:
+                                        cancel_approval_reminders(
+                                            record,
+                                            stage='second',
+                                        )
+                                    )
                                     _log_record_change(
                                         record,
                                         actor=request.user,
@@ -1477,21 +1814,33 @@ def birthboard_approve(request):
                             if record.status != BirthboardRecord.Status.WAITING_APPROVE or record.second_approver:
                                 error_concurrency = True
                             else:
-                                reasons = request.POST.getlist("reasons")
-                                detail = request.POST.get("detail", "")
+                                reasons = reject_form.cleaned_data['reasons']
+                                detail = reject_form.cleaned_data['detail']
                                 _reject_record_by_admin(record, reasons, detail, actor=request.user)
-                                cancel_approval_reminders(record, stage='second')
+                                transaction.on_commit(
+                                    lambda record=record:
+                                    cancel_approval_reminders(
+                                        record,
+                                        stage='second',
+                                    )
+                                )
                                 message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
                 elif action == "reject":
-                    # READY/ONGOING 等非待审核状态的驳回
-                    if _is_user_related_to_record(record, request.user):
+                    # 审核通过后仅 READY/ONGOING/FINISHED 可因违规驳回。
+                    if record.status not in {
+                        BirthboardRecord.Status.READY,
+                        BirthboardRecord.Status.ONGOING,
+                        BirthboardRecord.Status.FINISHED,
+                    }:
+                        error_concurrency = True
+                    elif _is_user_related_to_record(record, request.user):
                         message = "此投放活动与你有关，你不能参与审核。"
                     else:
-                        reasons = request.POST.getlist("reasons")
-                        detail = request.POST.get("detail", "")
+                        reasons = reject_form.cleaned_data['reasons']
+                        detail = reject_form.cleaned_data['detail']
                         _reject_record_by_admin(record, reasons, detail, actor=request.user)
                         message = f"活动 {record.receiver_name}({record.receiver_username}) 已被驳回。"
-        except BirthboardRecord.DoesNotExist:
+        except (BirthboardRecord.DoesNotExist, TypeError, ValueError):
             message = "未找到该记录。"
         # 防止重复提交，POST-Redirect-GET；并发冲突时带 error=concurrency，前端弹窗提示刷新。
         if error_concurrency:

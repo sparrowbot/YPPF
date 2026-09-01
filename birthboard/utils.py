@@ -25,7 +25,7 @@ def calculate_per_cost(mode: int, sender_count: int) -> int:
         mode = 0
     if sender_count <= 0:
         sender_count = 1
-    per = MODE_COST[mode] // sender_count
+    per = (MODE_COST[mode] + sender_count - 1) // sender_count
     if per < MIN_COST_PER_SENDER:
         per = MIN_COST_PER_SENDER
     return per

@@ -60,47 +60,56 @@ def open_and_login(playwright, url, username, password, max_login_retry=5):
     ocr = ddddocr.DdddOcr(show_ad=False)
 
     for attempt in range(1, max_login_retry + 1):
-        while True:
-            browser = None
+        browser = None
+        try:
+            print(f"\n===== 开始登录（第 {attempt}/{max_login_retry} 次）=====")
+            browser = playwright.chromium.launch(
+                headless=shihannet.headless,
+                slow_mo=shihannet.slow_mo_ms,
+            )
+            page = browser.new_page()
             try:
-                print(f"\n===== 开始登录（第 {attempt}/{max_login_retry} 次）=====")
-                browser = playwright.chromium.launch(headless=False, slow_mo=800)
-                page = browser.new_page()
+                page.goto(url)
+            except Exception as error:
+                if _is_network_goto_error(error):
+                    raise ConnectionError('投放屏站点暂时不可达') from error
+                raise
+
+            page.wait_for_timeout(1000)
+
+            page.fill('input[name="username"]', username)
+            page.fill('input[name="password"]', password)
+
+            code = _solve_captcha(page, ocr)
+            page.locator("input#randCode").fill(code)
+            page.wait_for_timeout(500)
+            page.locator("button:has-text('登录')").click()
+            page.wait_for_timeout(2000)
+
+            error_popup = page.locator("div#ext-gen44.x-shadow")
+            if error_popup.is_visible(timeout=1500):
+                raise RuntimeError("验证码错误弹窗")
+
+            print("登录成功")
+            page.locator(
+                "#ext-gen1105 > .x-grid-cell-inner > .x-tree-elbow-img"
+            ).click()
+            return browser, page
+        except Exception as error:
+            print(f"登录失败: {error}")
+            if browser is not None:
                 try:
-                    page.goto(url)
-                except Exception as e:
-                    if _is_network_goto_error(e):
-                        print(f"网络未恢复，5分钟后重试: {e}")
-                        if browser is not None:
-                            browser.close()
-                        time.sleep(300)
-                        continue
-                    raise
-
-                page.wait_for_timeout(1000)
-
-                page.fill('input[name="username"]', username)
-                page.fill('input[name="password"]', password)
-
-                code = _solve_captcha(page, ocr)
-                page.locator("input#randCode").fill(code)
-                page.wait_for_timeout(500)
-                page.locator("button:has-text('登录')").click()
-                page.wait_for_timeout(2000)
-
-                error_popup = page.locator("div#ext-gen44.x-shadow")
-                if error_popup.is_visible(timeout=1500):
-                    raise RuntimeError("验证码错误弹窗")
-
-                print("登录成功")
-                page.locator("#ext-gen1105 > .x-grid-cell-inner > .x-tree-elbow-img").click()
-                return browser, page
-            except Exception as e:
-                print(f"登录失败: {e}")
-                if browser is not None:
                     browser.close()
-                time.sleep(2)
-                break
+                except Exception:
+                    pass
+            if attempt < max_login_retry:
+                retry_seconds = (
+                    shihannet.network_retry_seconds
+                    if isinstance(error, ConnectionError)
+                    else 2
+                )
+                if retry_seconds > 0:
+                    time.sleep(retry_seconds)
 
     raise RuntimeError("登录重试次数已耗尽")
 
@@ -569,7 +578,7 @@ def delete_material(page, image_name):
 
     if len(not_matched) > 0:
         print("有未匹配到素材：" + ", ".join(not_matched))
-        if len(not_matched) == len(image_name):
+        if len(not_matched) == len(names):
             return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
 
     if not _safe_click(frame.locator("#ElementDeleteID").first, "删除按钮#ElementDeleteID", page, timeout=2500):
@@ -743,7 +752,7 @@ def update_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
 
     if len(not_matched) > 0:
         print("有未匹配到素材：" + ", ".join(not_matched))
-        if len(not_matched) == len(image_name):
+        if len(not_matched) == len(names):
             return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
 
     _close_picker_window(play_frame, page)
@@ -935,7 +944,7 @@ def delete_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
 
     if len(not_matched) > 0:
         print("有未匹配到的删除素材："+", ".join(not_matched))
-        if len(not_matched) == len(image_name):
+        if len(not_matched) == len(names):
             page.locator("[id=\"42-tab\"]").content_frame.get_by_role("button", name="返回").click()
             return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
    
@@ -976,7 +985,9 @@ def delete_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
         return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
     return _step_result(True, result=image_name)
 
-def update_list(page, up_image_name=[], del_image_name=[]):
+def update_list(page, up_image_name=None, del_image_name=None):
+    up_image_name = up_image_name or []
+    del_image_name = del_image_name or []
     if up_image_name:
         if del_image_name:
             print("同时指定了上传和删除素材，优先执行删除后再上传")
@@ -1191,19 +1202,19 @@ def _run_step_with_restart(playwright, browser, page, url, username, password, l
 
 
 def _run_update_cycle(playwright, browser, page, url, username, password, up_image_name, del_image_name):
+    deletion_step_count = 0
     if up_image_name:
         if del_image_name:
             print("同时指定了上传和删除素材，优先执行删除后再上传")
             workflow = [
-                ("上传素材", upload_material, (up_image_name,)),
-                ("更新播单-生日三联", update_playlist, (up_image_name, "生日三联")),
-                # ("关闭播单-生日三联", close_playlist, ()),
                 ("从播单删除-生日三联", delete_playlist, (del_image_name, "生日三联")),
-                ("更新播单-1号横屏", update_playlist, (up_image_name, "1号横屏")),
-                # ("关闭播单-1号横屏", close_playlist, ()),
                 ("从播单删除-1号横屏", delete_playlist, (del_image_name, "1号横屏")),
                 ("删除素材库", delete_material, (del_image_name,)),
+                ("上传素材", upload_material, (up_image_name,)),
+                ("更新播单-生日三联", update_playlist, (up_image_name, "生日三联")),
+                ("更新播单-1号横屏", update_playlist, (up_image_name, "1号横屏")),
             ]
+            deletion_step_count = 3
         else:
             print("仅指定了上传素材，执行上传和播单更新")
             workflow = [
@@ -1221,11 +1232,20 @@ def _run_update_cycle(playwright, browser, page, url, username, password, up_ima
                 ("从播单删除-1号横屏", delete_playlist, (del_image_name, "1号横屏")),
                 ("删除素材库", delete_material, (del_image_name,)),
             ]
+            deletion_step_count = len(workflow)
         else:
             print("未指定上传或删除素材，跳过更新")
-            return browser, page, False
+            return browser, page, StepOutcome(
+                label="update_cycle",
+                ok=True,
+                result=True,
+            )
 
-    for label, func, args in workflow:
+    deletion_failures = []
+    for step_index, (label, func, args) in enumerate(workflow):
+        if deletion_failures and step_index == deletion_step_count:
+            # Mixed cycle barrier: incomplete removals block new uploads.
+            break
         browser, page, outcome = _run_step_with_restart(
             playwright=playwright,
             browser=browser,
@@ -1239,7 +1259,30 @@ def _run_update_cycle(playwright, browser, page, url, username, password, up_ima
         )
         if not outcome.ok:
             print(f"步骤[{label}]最终失败: {outcome.error or outcome.result}")
+            if step_index < deletion_step_count:
+                # Takedown targets are independent. Continue so a failure on
+                # one playlist cannot leave the same content active on the
+                # other display. The caller still receives failure and keeps
+                # the durable retry marker.
+                deletion_failures.append(outcome)
+                continue
             return browser, page, outcome
+
+    if deletion_failures:
+        pending = []
+        errors = []
+        for failure in deletion_failures:
+            pending.extend(failure.pending)
+            errors.append(
+                f"{failure.label}: {failure.error or failure.result}"
+            )
+        return browser, page, StepOutcome(
+            label="update_cycle",
+            ok=False,
+            retryable=True,
+            pending=list(dict.fromkeys(pending)),
+            error="; ".join(errors),
+        )
 
     return browser, page, StepOutcome(label="update_cycle", ok=True, result=True)
 

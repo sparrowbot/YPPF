@@ -33,10 +33,16 @@ def build_full_url(path: str, root: str | None = None) -> str:
     return parse.urljoin(root.rstrip('/') + '/', path)
 
 
-def _is_same_site_absolute(target: str) -> bool:
+def _is_same_site_absolute(
+    target: str,
+    *,
+    require_https: bool = False,
+) -> bool:
     """Whether ``target`` is an absolute URL on the configured site origin."""
     parsed = parse.urlsplit(target)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    if require_https and parsed.scheme != 'https':
         return False
     base = parse.urlsplit(GLOBAL_CONFIG.base_url)
     return (
@@ -70,6 +76,9 @@ def safe_local_redirect_target(
         ):
             return fallback
         return target
-    if _is_same_site_absolute(target):
+    if _is_same_site_absolute(
+        target,
+        require_https=request.is_secure(),
+    ):
         return target
     return fallback

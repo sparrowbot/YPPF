@@ -44,7 +44,12 @@ __all__ = [
 
 def _receiver_user(record: BirthboardRecord):
     """寿星账号对象；账号不存在时返回 None。"""
-    return User.objects.filter(username=record.receiver_username).first()
+    receiver_id = record.participants.filter(
+        role=BirthboardParticipant.Role.RECEIVER,
+    ).values_list('user_id', flat=True).first()
+    if receiver_id is None:
+        return None
+    return User.objects.filter(pk=receiver_id).first()
 
 
 def _sender_users(record: BirthboardRecord) -> list[User]:
@@ -93,7 +98,7 @@ def notify_refund(record: BirthboardRecord, paid_users: dict):
                 Notification.Type.NEEDREAD,
                 '生日祝福投放退款通知',
                 f'你参与的 {record.receiver_name} 的生日祝福投放（{record.date}）已终止，'
-                f'已退还 {record.per_cost} 元气值。',
+                '已按你的实际支付记录退还元气值。',
                 URL='/birthboard/confirm',
                 to_wechat=dict(level=WechatMessageLevel.IMPORTANT),
             )
@@ -112,7 +117,7 @@ def notify_auto_reject_refund(record: BirthboardRecord, paid_users: dict):
                 Notification.Type.NEEDREAD,
                 '生日祝福投放退款通知',
                 f'你参与的 {record.receiver_name} 的生日祝福投放（{record.date}）'
-                f'因超时未确认已自动取消，已退还 {record.per_cost} 元气值。',
+                '因超时未确认已自动取消，已按实际支付记录退还元气值。',
                 URL='/birthboard/confirm',
                 to_wechat=dict(level=WechatMessageLevel.IMPORTANT),
             )

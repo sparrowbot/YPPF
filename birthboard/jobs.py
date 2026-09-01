@@ -1,5 +1,6 @@
 from datetime import timedelta, datetime
 import os
+import uuid
 
 from django.db import transaction
 from django.utils import timezone
@@ -26,7 +27,10 @@ logger = bb_get_logger(__name__)
 __all__ = [
     'birthboard_waiting_remind_and_autoreject',
     'birthboard_nightly_update_2345',
+    'birthboard_nightly_retry_0005',
     'birthboard_auto_terminate_stale_waiting',
+    'birthboard_retry_pending_takedowns',
+    'attempt_pending_takedown',
 ]
 
 _BB_UPDATE_LOCK_KEY = "birthboard:update_in_progress"
@@ -57,15 +61,28 @@ def _get_abs_image_path(image_field) -> str | None:
     return os.path.abspath(name)
 
 
-def _set_update_lock(val: bool, timeout: int = 60 * 60):
+def _acquire_update_lock(timeout: int = 60 * 60) -> str | None:
+    """Acquire the cross-process display lock without replacing its owner."""
+    token = uuid.uuid4().hex
     try:
-        if val:
-            # set with timeout to avoid stale lock
-            cache.set(_BB_UPDATE_LOCK_KEY, True, timeout=timeout)
-        else:
+        if cache.add(_BB_UPDATE_LOCK_KEY, token, timeout=timeout):
+            return token
+    except Exception:
+        logger.exception(
+            '[birthboard.jobs] failed to acquire display update lock'
+        )
+    return None
+
+
+def _release_update_lock(token: str) -> None:
+    """Release the display lock only when this process still owns it."""
+    try:
+        if cache.get(_BB_UPDATE_LOCK_KEY) == token:
             cache.delete(_BB_UPDATE_LOCK_KEY)
     except Exception:
-        logger.exception("[birthboard.jobs] _set_update_lock: cache operation failed")
+        logger.exception(
+            '[birthboard.jobs] failed to release display update lock'
+        )
 
 
 def _get_mode_duration_days(record: BirthboardRecord) -> int:
@@ -90,6 +107,110 @@ def _get_mode_duration_days(record: BirthboardRecord) -> int:
     except Exception:
         logger.exception("[birthboard.jobs] _get_mode_duration_days: failed to deduce duration, default to 1")
     return 1
+
+
+def attempt_pending_takedown(record_id: int) -> bool:
+    """Serialize a display takedown against nightly updates and other retries."""
+    lock_token = _acquire_update_lock()
+    if lock_token is None:
+        return False
+    try:
+        return _attempt_pending_takedown(record_id)
+    finally:
+        _release_update_lock(lock_token)
+
+
+def _attempt_pending_takedown(record_id: int) -> bool:
+    """Try to remove a rejected/revoked active image from every display list.
+
+    The pending flag is cleared only after the external controller reports a
+    complete success. Failures remain durable for the periodic retry job.
+    """
+    record = BirthboardRecord.objects.filter(
+        pk=record_id,
+        display_takedown_pending=True,
+    ).first()
+    if record is None:
+        return True
+    image_path = _get_abs_image_path(record.image)
+    if not image_path:
+        logger.error(
+            '[birthboard.jobs] pending takedown has no image record_id=%s',
+            record_id,
+        )
+        return False
+
+    from playwright.sync_api import sync_playwright
+    from birthboard.config import shihannet
+    from birthboard.web_controller import open_and_login, _run_update_cycle
+
+    browser = None
+    outcome = None
+    try:
+        with sync_playwright() as playwright:
+            browser, page = open_and_login(
+                playwright=playwright,
+                url=shihannet.url,
+                username=shihannet.username,
+                password=shihannet.password,
+            )
+            browser, page, outcome = _run_update_cycle(
+                playwright=playwright,
+                browser=browser,
+                page=page,
+                url=shihannet.url,
+                username=shihannet.username,
+                password=shihannet.password,
+                up_image_name=[],
+                del_image_name=[image_path],
+            )
+    except Exception:
+        logger.exception(
+            '[birthboard.jobs] display takedown failed record_id=%s',
+            record_id,
+        )
+        return False
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                logger.warning(
+                    '[birthboard.jobs] display browser close failed record_id=%s',
+                    record_id,
+                )
+
+    if not getattr(outcome, 'ok', False):
+        logger.error(
+            '[birthboard.jobs] display takedown incomplete record_id=%s',
+            record_id,
+        )
+        return False
+
+    with transaction.atomic():
+        locked_record = BirthboardRecord.objects.select_for_update().get(
+            pk=record_id,
+        )
+        if locked_record.display_takedown_pending:
+            locked_record.display_takedown_pending = False
+            locked_record.save(update_fields=['display_takedown_pending'])
+    return True
+
+
+@periodical(
+    'interval',
+    'birthboard_retry_pending_takedowns',
+    minutes=15,
+)
+def birthboard_retry_pending_takedowns():
+    """Retry durable display takedowns that did not complete immediately."""
+    record_ids = list(
+        BirthboardRecord.objects.filter(display_takedown_pending=True)
+        .order_by('id')
+        .values_list('id', flat=True)
+    )
+    for record_id in record_ids:
+        attempt_pending_takedown(record_id)
 
 
 def _today_local_date():
@@ -124,6 +245,7 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord):
         BirthboardParticipant.objects.select_for_update().filter(
             record=record,
             status=BirthboardParticipant.Status.PAID,
+            role=BirthboardParticipant.Role.SENDER,
         )
     )
     # logger.debug(
@@ -154,11 +276,12 @@ def _refund_paid_participants_and_terminate(record: BirthboardRecord):
             #     paid_part.id,
             #     record.per_cost,
             # )
-            paid_user.YQpoint += record.per_cost
+            refund_amount = paid_part.cost
+            paid_user.YQpoint += refund_amount
             paid_user.save(update_fields=["YQpoint"])
             YQPointRecord.objects.create(
                 user=paid_user,
-                delta=record.per_cost,
+                delta=refund_amount,
                 source="birthboard_refund",
                 source_type=getattr(YQPointRecord.SourceType, "BIRTHBOARD", 0),
             )
@@ -340,12 +463,17 @@ def birthboard_waiting_remind_and_autoreject():
     hour=23,
     minute=45,
 )
-def birthboard_nightly_update_2345():
+def birthboard_nightly_update_2345(
+    target_date=None,
+    *,
+    send_starting_reminder=True,
+):
     """Nightly task at 23:45: switch READY->ONGOING and ONGOING->FINISHED for target_date=tomorrow,
     collect absolute image paths and call update_list for each path.
     """
     today = _today_local_date()
-    target_date = today + timedelta(days=1)
+    if target_date is None:
+        target_date = today + timedelta(days=1)
     logger.info("[birthboard.jobs] nightly_update_2345: start target_date=%s", target_date)
 
     # lazy imports for playright-dependent modules
@@ -358,14 +486,21 @@ def birthboard_nightly_update_2345():
     start_records = []
     stop_records = []
 
-    # Acquire lock (cache key) to notify views
-    _set_update_lock(True)
-    try:
-        tomorrow_records = BirthboardRecord.objects.filter(
-            status=BirthboardRecord.Status.READY, date=target_date
+    lock_token = _acquire_update_lock()
+    if lock_token is None:
+        logger.warning(
+            '[birthboard.jobs] nightly update skipped because display lock '
+            'is unavailable'
         )
-        for rec in tomorrow_records:
-            notify_broadcast_starting_tomorrow(rec, target_date)
+        return
+    try:
+        if send_starting_reminder:
+            tomorrow_records = BirthboardRecord.objects.filter(
+                status=BirthboardRecord.Status.READY,
+                date=target_date,
+            )
+            for rec in tomorrow_records:
+                notify_broadcast_starting_tomorrow(rec, target_date)
 
         # START: READY -> ONGOING
         with transaction.atomic():
@@ -387,7 +522,6 @@ def birthboard_nightly_update_2345():
                     after_status=rec.status,
                     detail={"scope": "nightly_start", "date": str(target_date)},
                 )
-                transaction.on_commit(lambda rec=rec: notify_broadcast_started(rec))
                 img_path = _get_abs_image_path(rec.image)
                 if img_path:
                     to_start.append(img_path)
@@ -415,7 +549,6 @@ def birthboard_nightly_update_2345():
                         after_status=rec.status,
                         detail={"scope": "nightly_finish", "date": str(target_date), "duration_days": dur},
                     )
-                    transaction.on_commit(lambda rec=rec, end_date=end_date: notify_broadcast_ended(rec, end_date))
                     img_path = _get_abs_image_path(rec.image)
                     if img_path:
                         to_stop.append(img_path)
@@ -423,7 +556,11 @@ def birthboard_nightly_update_2345():
                 elif dur > 1 and end_date - timedelta(days=1) == target_date:
                     transaction.on_commit(lambda rec=rec, end_date=end_date: notify_broadcast_ending_soon(rec, end_date))
 
-        # After commits, call update_list for each path (do not roll back on update_list failure)
+        # After the database commit, synchronize removals before additions.
+        # The two phases have separate outcomes so a failed upload cannot
+        # roll back a removal that has already succeeded on the display.
+        stop_update_ok = not to_stop
+        start_update_ok = not to_start
         try:
             url = shihannet.url
             username = shihannet.username
@@ -438,47 +575,86 @@ def birthboard_nightly_update_2345():
             #         update_list(p)
             #     except Exception:
             #         logger.exception("[birthboard.jobs] nightly_update_2345: update_list(stop) failed for %s", p)
-            with sync_playwright() as p:
-                browser = None
-                page = None
-                try:
-                    browser, page = open_and_login(
-                        playwright=p,
-                        url=url,
-                        username=username,
-                        password=password,
-                    )
+            if to_start or to_stop:
+                with sync_playwright() as p:
+                    browser = None
+                    page = None
+                    try:
+                        browser, page = open_and_login(
+                            playwright=p,
+                            url=url,
+                            username=username,
+                            password=password,
+                        )
 
-                    browser, page, outcome = _run_update_cycle(
-                        playwright=p,
-                        browser=browser,
-                        page=page,
-                        url=url,
-                        username=username,
-                        password=password,
-                        up_image_name=to_start,
-                        del_image_name=to_stop,
-                    )
-                finally:
-                    if browser is not None:
-                        try:
-                            browser.close()
-                        except Exception:
-                            pass
+                        if to_stop:
+                            browser, page, stop_outcome = _run_update_cycle(
+                                playwright=p,
+                                browser=browser,
+                                page=page,
+                                url=url,
+                                username=username,
+                                password=password,
+                                up_image_name=[],
+                                del_image_name=to_stop,
+                            )
+                            stop_update_ok = bool(
+                                getattr(stop_outcome, 'ok', False)
+                            )
+                        if stop_update_ok and to_start:
+                            browser, page, start_outcome = _run_update_cycle(
+                                playwright=p,
+                                browser=browser,
+                                page=page,
+                                url=url,
+                                username=username,
+                                password=password,
+                                up_image_name=to_start,
+                                del_image_name=[],
+                            )
+                            start_update_ok = bool(
+                                getattr(start_outcome, 'ok', False)
+                            )
+                    finally:
+                        if browser is not None:
+                            try:
+                                browser.close()
+                            except Exception:
+                                pass
         except Exception:
             logger.exception("[birthboard.jobs] nightly_update_2345: update_list loop failed")
-            outcome = None
+            if to_stop and not stop_update_ok:
+                start_update_ok = False
+            elif to_start:
+                start_update_ok = False
 
-        if outcome is None or not outcome.ok:
-            # 屏幕更新失败：回退本次已推进的记录状态，让下个任务周期重新尝试，
-            # 避免数据库与外部屏幕永久不一致。
+        if not stop_update_ok:
+            # A required removal failed. Roll back both phases and do not add
+            # new content while stale content may still be present.
             logger.error(
-                "[birthboard.jobs] nightly_update_2345: display update failed, reverting transitions "
+                "[birthboard.jobs] nightly_update_2345: display removal failed, reverting transitions "
                 "to_start=%s to_stop=%s",
                 len(to_start),
                 len(to_stop),
             )
             _revert_nightly_transitions(start_records, stop_records, target_date)
+        elif not start_update_ok:
+            logger.error(
+                '[birthboard.jobs] nightly_update_2345: display upload failed, '
+                'reverting start transitions to_start=%s',
+                len(to_start),
+            )
+            _revert_nightly_transitions(start_records, [], target_date)
+
+        if start_update_ok:
+            for record in start_records:
+                notify_broadcast_started(record)
+        if stop_update_ok:
+            for record in stop_records:
+                end_date = record.date + timedelta(
+                    days=_get_mode_duration_days(record)
+                )
+                notify_broadcast_ended(record, end_date)
 
         logger.info(
             "[birthboard.jobs] nightly_update_2345: finished to_start=%s to_stop=%s",
@@ -486,7 +662,21 @@ def birthboard_nightly_update_2345():
             len(to_stop),
         )
     finally:
-        _set_update_lock(False)
+        _release_update_lock(lock_token)
+
+
+@periodical(
+    'cron',
+    'birthboard_nightly_retry_0005',
+    hour=0,
+    minute=5,
+)
+def birthboard_nightly_retry_0005():
+    """Retry the previous 23:45 display sync for the now-current date."""
+    birthboard_nightly_update_2345(
+        target_date=_today_local_date(),
+        send_starting_reminder=False,
+    )
 
 
 # @periodical(

@@ -130,7 +130,9 @@
     },
     "birthboard": {
         "contact_email": "$BIRTHBOARD_CONTACT_EMAIL$",
-        "template_download_url": "https://www.bilibili.com/video/BV1GJ411x7h7/?spm_id_from=333.337.search-card.all.click",
+        "template_download_url": "$BIRTHBOARD_TEMPLATE_DOWNLOAD_URL$",
+        "max_image_bytes": 10485760,
+        "max_senders": 20,
         "contributor_orgs": [
             {
                 "name": "叁拾伍圆设计实验室",
@@ -151,6 +153,9 @@
     "shihannet": {
         "url": "$SHIHANNET_URL$",
         "username": "$SHIHANNET_USERNAME$",
-        "password": "$SHIHANNET_PASSWORD$"
+        "password": "$SHIHANNET_PASSWORD$",
+        "headless": true,
+        "slow_mo_ms": 0,
+        "network_retry_seconds": 10
     }
 }

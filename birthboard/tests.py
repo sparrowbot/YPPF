@@ -30,16 +30,21 @@ User = get_user_model()
 
 class BirthboardUtilsTests(TestCase):
 	def test_calculate_per_cost_basic(self):
-		self.assertEqual(calculate_per_cost(0, 2), 17)
+		self.assertEqual(calculate_per_cost(0, 2), 18)
 		self.assertEqual(calculate_per_cost(1, 3), 20)
 
+	def test_calculate_per_cost_never_undercharges_total(self):
+		for sender_count in range(1, 21):
+			per_sender = calculate_per_cost(0, sender_count)
+			self.assertGreaterEqual(per_sender * sender_count, 35)
+
 	def test_calculate_per_cost_min_floor(self):
-		# 35 / 10 = 3, still above minimum 2
-		self.assertEqual(calculate_per_cost(0, 10), 3)
+		# 35 / 20 rounds up to 2, which is also the configured minimum.
+		self.assertEqual(calculate_per_cost(0, 20), 2)
 
 	def test_calculate_per_cost_invalid_mode(self):
 		# invalid mode falls back to mode 0
-		self.assertEqual(calculate_per_cost(999, 2), 17)
+		self.assertEqual(calculate_per_cost(999, 2), 18)
 
 
 class BirthboardViewHelperTests(TestCase):
@@ -96,10 +101,16 @@ class BirthboardViewHelperTests(TestCase):
 		self.assertEqual(self.sender.YQpoint, 50)
 		self.assertEqual(YQPointRecord.objects.filter(user=self.sender, source="birthboard").count(), 0)
 
-	def test_reject_record_by_admin_upserts_issue(self):
+	def test_reject_record_by_admin_updates_existing_issue(self):
 		record, _ = self._create_record_with_participant()
+		record.status = BirthboardRecord.Status.WAITING_APPROVE
+		record.save(update_fields=['status'])
+		BirthboardRejectedIssue.objects.create(
+			record=record,
+			reasons='低俗恶搞',
+			detail='first',
+		)
 
-		_reject_record_by_admin(record, ["低俗恶搞"], "first")
 		_reject_record_by_admin(record, ["敏感引战"], "second")
 
 		record.refresh_from_db()
@@ -108,6 +119,21 @@ class BirthboardViewHelperTests(TestCase):
 		issue = BirthboardRejectedIssue.objects.get(record=record)
 		self.assertEqual(issue.reasons, "敏感引战")
 		self.assertEqual(issue.detail, "second")
+
+	def test_reject_record_by_admin_refuses_nonreviewable_state(self):
+		record, _ = self._create_record_with_participant()
+
+		with self.assertRaises(ValueError):
+			_reject_record_by_admin(record, ['低俗恶搞'], 'invalid state')
+
+		record.refresh_from_db()
+		self.assertEqual(
+			record.status,
+			BirthboardRecord.Status.WAITING_CONFIRM,
+		)
+		self.assertFalse(
+			BirthboardRejectedIssue.objects.filter(record=record).exists()
+		)
 
 	def test_refund_paid_participants_and_terminate_logs_change(self):
 		record, participant = self._create_record_with_participant(participant_status=BirthboardParticipant.Status.PAID)
@@ -137,8 +163,12 @@ class BirthboardViewHelperTests(TestCase):
 
 class BirthboardNightlyJobsTests(TestCase):
 	def setUp(self):
+		cache.delete(bb_jobs._BB_UPDATE_LOCK_KEY)
 		self.img1 = SimpleUploadedFile("test1.jpg", b"fake-image-1", content_type="image/jpeg")
 		self.img2 = SimpleUploadedFile("test2.jpg", b"fake-image-2", content_type="image/jpeg")
+
+	def tearDown(self):
+		cache.delete(bb_jobs._BB_UPDATE_LOCK_KEY)
 
 	@patch("playwright.sync_api.sync_playwright")
 	@patch("birthboard.web_controller._run_update_cycle")
@@ -179,10 +209,19 @@ class BirthboardNightlyJobsTests(TestCase):
 		self.assertEqual(rec_start.status, BirthboardRecord.Status.ONGOING)
 		self.assertEqual(rec_finish.status, BirthboardRecord.Status.FINISHED)
 
-		self.assertEqual(mock_update.call_count, 1)
-		kwargs = mock_update.call_args.kwargs
-		self.assertIn(os.path.abspath(rec_start.image.path), kwargs["up_image_name"])
-		self.assertIn(os.path.abspath(rec_finish.image.path), kwargs["del_image_name"])
+		self.assertEqual(mock_update.call_count, 2)
+		stop_kwargs = mock_update.call_args_list[0].kwargs
+		start_kwargs = mock_update.call_args_list[1].kwargs
+		self.assertEqual(stop_kwargs["up_image_name"], [])
+		self.assertIn(
+			os.path.abspath(rec_finish.image.path),
+			stop_kwargs["del_image_name"],
+		)
+		self.assertEqual(start_kwargs["del_image_name"], [])
+		self.assertIn(
+			os.path.abspath(rec_start.image.path),
+			start_kwargs["up_image_name"],
+		)
 
 	@patch("playwright.sync_api.sync_playwright")
 	@patch("birthboard.web_controller._run_update_cycle")
@@ -224,6 +263,21 @@ class BirthboardNightlyJobsTests(TestCase):
 		rec_finish.refresh_from_db()
 		self.assertEqual(rec_start.status, BirthboardRecord.Status.READY)  # 已回退
 		self.assertEqual(rec_finish.status, BirthboardRecord.Status.ONGOING)  # 已回退
+
+	def test_0005_retry_targets_current_date_without_duplicate_reminder(self):
+		retry_date = datetime(2026, 9, 2).date()
+		with patch(
+			'birthboard.jobs._today_local_date',
+			return_value=retry_date,
+		), patch(
+			'birthboard.jobs.birthboard_nightly_update_2345'
+		) as mock_update:
+			bb_jobs.birthboard_nightly_retry_0005()
+
+		mock_update.assert_called_once_with(
+			target_date=retry_date,
+			send_starting_reminder=False,
+		)
 
 
 class BirthboardAutoTerminateStaleTests(TestCase):
@@ -278,7 +332,11 @@ class BirthboardAutoTerminateStaleTests(TestCase):
 
 class BirthboardLockCoordinationTests(TestCase):
 	def setUp(self):
+		cache.delete(bb_views._BB_UPDATE_LOCK_KEY)
 		self.img = SimpleUploadedFile("test3.jpg", b"fake-image-3", content_type="image/jpeg")
+
+	def tearDown(self):
+		cache.delete(bb_views._BB_UPDATE_LOCK_KEY)
 
 	def test_handle_revoke_respects_lock(self):
 		sender = User.objects.create_user(username="lock_sender", name="Lock Sender", password="test")
@@ -329,6 +387,40 @@ class BirthboardLockCoordinationTests(TestCase):
 		rec.refresh_from_db()
 		self.assertEqual(rec.status, BirthboardRecord.Status.READY)
 
+	def test_revoke_rechecks_lock_after_record_serialization(self):
+		sender = User.objects.create_user(
+			username='late_lock_sender',
+			name='Late Lock Sender',
+			password='test',
+		)
+		rec = BirthboardRecord.objects.create(
+			receiver_username='x',
+			receiver_name='x',
+			date=timezone.now().date(),
+			mode=0,
+			per_cost=1,
+			image=self.img,
+			status=BirthboardRecord.Status.READY,
+		)
+		BirthboardParticipant.objects.create(
+			record=rec,
+			user=sender,
+			role=BirthboardParticipant.Role.SENDER,
+			is_initiator=True,
+			cost=1,
+			status=BirthboardParticipant.Status.PAID,
+		)
+
+		with patch(
+			'birthboard.views._display_update_is_locked',
+			side_effect=[False, True],
+		):
+			result = bb_views._handle_revoke(str(rec.pk), actor=sender)
+
+		self.assertEqual(result, 'locked')
+		rec.refresh_from_db()
+		self.assertEqual(rec.status, BirthboardRecord.Status.READY)
+
 
 class LockUiIntegrationTests(TestCase):
 	def setUp(self):
@@ -342,7 +434,7 @@ class LockUiIntegrationTests(TestCase):
 		BirthboardContract.objects.create(user=self.user, signed=True)
 		BirthboardContract.objects.create(user=self.approver, signed=True)
 
-	def test_confirm_page_shows_disabled_revoke_when_locked(self):
+	def test_confirm_page_hides_revoke_action_when_locked(self):
 		self.client.login(username="tester", password="test")
 		img = SimpleUploadedFile("img.jpg", b"img", content_type="image/jpeg")
 		rec = BirthboardRecord.objects.create(
@@ -354,19 +446,30 @@ class LockUiIntegrationTests(TestCase):
 			image=img,
 			status=BirthboardRecord.Status.READY,
 		)
+		BirthboardParticipant.objects.create(
+			record=rec,
+			user=self.user,
+			role=BirthboardParticipant.Role.SENDER,
+			is_initiator=True,
+			cost=1,
+			status=BirthboardParticipant.Status.PAID,
+		)
 		# set lock
 		from django.core.cache import cache
-		cache.set("birthboard:update_in_progress", True, timeout=300)
+		lock_key = "birthboard:update_in_progress"
+		cache.set(lock_key, True, timeout=300)
+		self.addCleanup(cache.delete, lock_key)
 
 		resp = self.client.get(
-			reverse('birthboard_confirm') + '?tab=received',
+			reverse('birthboard_confirm') + '?tab=participation',
 			HTTP_REFERER='/birthboard/',
 		)
 		content = resp.content.decode('utf-8')
 		self.assertIn('系统同步中，无法操作', content)
-		self.assertIn('disabled', content)
-		# clean
-		cache.delete("birthboard:update_in_progress")
+		self.assertNotIn(
+			f'onclick="showRevokeModal(\'{rec.pk}\')"',
+			content,
+		)
 
 	def test_confirm_form_includes_csrf_token(self):
 		"""确认扣款表单必须携带 CSRF token，否则 csrf_protect 会拒绝提交（403）。"""
@@ -588,18 +691,13 @@ class BirthboardConcurrencyFixTests(TestCase):
 		)
 
 	def test_payment_rejected_after_revoke(self):
-		# 发起人撤销（不退款）后，参与者付款必须被拒绝，不能扣款
-		record = self._make_record(BirthboardRecord.Status.WAITING_CONFIRM)
+		# A stale payment page cannot charge after the record was cancelled.
+		record = self._make_record(BirthboardRecord.Status.CANCELED)
 		participant = BirthboardParticipant.objects.create(
 			record=record, user=self.sender,
 			role=BirthboardParticipant.Role.SENDER, is_initiator=True, cost=10,
 			status=BirthboardParticipant.Status.WAIT,
 		)
-		with patch("birthboard.views.notify_revoke"):
-			bb_views._handle_revoke(str(record.id), actor=self.sender)
-		record.refresh_from_db()
-		self.assertEqual(record.status, BirthboardRecord.Status.CANCELED)
-
 		self.client.force_login(self.sender)
 		resp = self.client.post(reverse("birthboard_confirm"), {
 			"tab": "participation", "record_id": str(record.id),
@@ -612,8 +710,8 @@ class BirthboardConcurrencyFixTests(TestCase):
 		self.assertEqual(participant.status, BirthboardParticipant.Status.WAIT)  # 未付款
 
 	def test_receiver_confirm_ignored_after_termination(self):
-		# 撤销后，被祝福人（旧页面）确认不能把已终止记录改回待审批
-		record = self._make_record(BirthboardRecord.Status.WAITING_RECEIVER)
+		# A stale receiver page cannot revive a cancelled record.
+		record = self._make_record(BirthboardRecord.Status.CANCELED)
 		BirthboardParticipant.objects.create(
 			record=record, user=self.sender,
 			role=BirthboardParticipant.Role.SENDER, is_initiator=True, cost=10,
@@ -624,11 +722,6 @@ class BirthboardConcurrencyFixTests(TestCase):
 			role=BirthboardParticipant.Role.RECEIVER, is_initiator=False, cost=0,
 			status=BirthboardParticipant.Status.WAIT,
 		)
-		with patch("birthboard.views.notify_revoke"):
-			bb_views._handle_revoke(str(record.id), actor=self.sender)
-		record.refresh_from_db()
-		self.assertEqual(record.status, BirthboardRecord.Status.CANCELED)
-
 		self.client.force_login(self.receiver)
 		resp = self.client.post(reverse("birthboard_confirm"), {
 			"tab": "received", "record_id": str(record.id),
@@ -735,30 +828,18 @@ class BirthboardConcurrencyFixTests(TestCase):
 		self.assertIsNone(record.second_approver)
 
 	def test_image_filename_counter_increments(self):
-		# 同一分钟内多次创建时，图片文件名追加序号避免覆盖
+		# 存储名不得暴露原文件名，并使用不可预测标识避免被枚举
 		from datetime import date as ddate
 		submit = datetime(2026, 8, 28, 10, 30)
 		img1 = SimpleUploadedFile("orig.jpg", b"fake", content_type="image/jpeg")
-		name1 = bb_views._generate_birthboard_image_filename(
-			img1, ddate(2026, 8, 28), submit_time=submit
-		)
-		self.assertEqual(name1, '20260828_202608281030_orig_1.jpg')
-		# 模拟第一条记录已保存（DB 中 image 字段带 birthboard_images/ 前缀）
-		BirthboardRecord.objects.create(
-			receiver_username=self.receiver.username,
-			receiver_name=self.receiver.username,
-			date=ddate(2026, 8, 28),
-			mode=0,
-			per_cost=10,
-			image=f'birthboard_images/{name1}',
-			status=BirthboardRecord.Status.WAITING_CONFIRM,
-		)
-		# 同分钟再次生成，序号递增，不与第一条重名
-		img2 = SimpleUploadedFile("orig.jpg", b"fake", content_type="image/jpeg")
-		name2 = bb_views._generate_birthboard_image_filename(
-			img2, ddate(2026, 8, 28), submit_time=submit
-		)
-		self.assertEqual(name2, '20260828_202608281030_orig_2.jpg')
+		with patch('birthboard.views.secrets.token_hex', return_value='a' * 32):
+			name1 = bb_views._generate_birthboard_image_filename(
+				img1,
+				ddate(2026, 8, 28),
+				submit_time=submit,
+			)
+		self.assertEqual(name1, f"20260828_{'a' * 32}.jpg")
+		self.assertNotIn('orig', name1)
 
 
 class BirthboardLikeTests(TestCase):
@@ -841,8 +922,11 @@ class ContributorOrgsConfigTests(TestCase):
 	"""制作名单配置（birthboard.contributor_orgs）的结构校验。"""
 
 	def test_contributor_orgs_config_structure(self):
-		from birthboard.config import CONFIG
-		orgs = CONFIG.contributor_orgs
+		import json
+		from boot.config import absolute_path
+
+		with open(absolute_path('./config_template.json'), encoding='utf8') as f:
+			orgs = json.load(f)['birthboard']['contributor_orgs']
 		self.assertIsInstance(orgs, list)
 		self.assertTrue(orgs, "contributor_orgs 不应为空，至少包含一个组织")
 		for org in orgs:
@@ -882,3 +966,496 @@ class BirthboardCheckYqpointTests(TestCase):
 		self.assertIn("me_cq", data["result"])
 		self.assertNotIn("other_cq", data["result"])
 		self.assertEqual(data["result"]["me_cq"]["balance"], 42)
+
+
+class BirthboardSecurityRegressionTests(TestCase):
+    """Server-side checks must remain effective without the page JavaScript."""
+
+    def setUp(self):
+        from birthboard.models import BirthboardContract
+
+        self.creator = User.objects.create_user(
+            username='secure_creator',
+            name='Creator',
+            password='test',
+            usertype=User.Type.STUDENT,
+        )
+        self.receiver = User.objects.create_user(
+            username='secure_receiver',
+            name='Receiver',
+            password='test',
+            usertype=User.Type.STUDENT,
+        )
+        self.other = User.objects.create_user(
+            username='secure_other',
+            name='Other',
+            password='test',
+            usertype=User.Type.STUDENT,
+        )
+        User.objects.filter(
+            pk__in=[self.creator.pk, self.receiver.pk, self.other.pk]
+        ).update(is_newuser=False, active=True)
+        self.creator.YQpoint = 40
+        self.creator.save(update_fields=['YQpoint'])
+        BirthboardContract.objects.create(
+            user=self.creator,
+            signed=True,
+        )
+        self.client.force_login(self.creator)
+
+    def _image(self, name='poster.png'):
+        from io import BytesIO
+        from PIL import Image
+
+        image_bytes = BytesIO()
+        Image.new('RGB', (2, 2), color='white').save(
+            image_bytes,
+            format='PNG',
+        )
+        return SimpleUploadedFile(
+            name,
+            image_bytes.getvalue(),
+            content_type='image/png',
+        )
+
+    def _record(self, status):
+        return BirthboardRecord.objects.create(
+            receiver_username=self.receiver.username,
+            receiver_name=self.receiver.name,
+            date=timezone.now().date() + timedelta(days=7),
+            mode=0,
+            per_cost=10,
+            image=self._image(),
+            status=status,
+        )
+
+    def test_page_context_does_not_expose_other_balances(self):
+        self.other.YQpoint = 987654
+        self.other.save(update_fields=['YQpoint'])
+
+        response = self.client.get(reverse('birthboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('yqpoints', response.context['json_context'])
+        self.assertNotContains(response, '987654')
+
+    def test_form_requires_creator_in_sender_list(self):
+        from birthboard.forms import BirthboardForm
+
+        form = BirthboardForm(
+            data={
+                'receiver': self.receiver.pk,
+                'senders': [self.other.pk],
+                'date': '2026-09-10',
+                'mode': '0',
+            },
+            files={'image': self._image()},
+            user=self.creator,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('senders', form.errors)
+
+    def test_sender_cannot_reject_after_waiting_stage(self):
+        record = self._record(BirthboardRecord.Status.READY)
+        participant = BirthboardParticipant.objects.create(
+            record=record,
+            user=self.creator,
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=False,
+            cost=10,
+            status=BirthboardParticipant.Status.WAIT,
+        )
+
+        response = self.client.post(
+            reverse('birthboard_confirm'),
+            {'tab': 'participation', 'reject_id': record.pk},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('error=concurrency', response['Location'])
+        record.refresh_from_db()
+        participant.refresh_from_db()
+        self.assertEqual(record.status, BirthboardRecord.Status.READY)
+        self.assertEqual(participant.status, BirthboardParticipant.Status.WAIT)
+
+    def test_initiator_cannot_refund_after_approval(self):
+        record = self._record(BirthboardRecord.Status.READY)
+        participant = BirthboardParticipant.objects.create(
+            record=record,
+            user=self.creator,
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=True,
+            cost=10,
+            status=BirthboardParticipant.Status.PAID,
+        )
+
+        response = self.client.post(
+            reverse('birthboard_confirm'),
+            {'tab': 'participation', 'abort_id': record.pk},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('error=concurrency', response['Location'])
+        record.refresh_from_db()
+        participant.refresh_from_db()
+        self.creator.refresh_from_db()
+        self.assertEqual(record.status, BirthboardRecord.Status.READY)
+        self.assertEqual(participant.status, BirthboardParticipant.Status.PAID)
+        self.assertEqual(self.creator.YQpoint, 40)
+
+    def test_initiator_can_abort_and_refund_before_review(self):
+        record = self._record(BirthboardRecord.Status.WAITING_CONFIRM)
+        participant = BirthboardParticipant.objects.create(
+            record=record,
+            user=self.creator,
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=True,
+            cost=10,
+            status=BirthboardParticipant.Status.PAID,
+        )
+
+        response = self.client.post(
+            reverse('birthboard_confirm'),
+            {'tab': 'participation', 'abort_id': record.pk},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        participant.refresh_from_db()
+        self.creator.refresh_from_db()
+        self.assertEqual(record.status, BirthboardRecord.Status.TERMINATED)
+        self.assertEqual(
+            participant.status,
+            BirthboardParticipant.Status.REFUNDED,
+        )
+        self.assertEqual(self.creator.YQpoint, 50)
+
+    def test_seen_state_requires_post(self):
+        from birthboard.models import BirthboardConfirmSeen
+
+        response = self.client.get(
+            f"{reverse('birthboard_confirm')}?tab=finished&mark_seen=1"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            BirthboardConfirmSeen.objects.filter(user=self.creator).exists()
+        )
+
+    def test_poster_requires_record_relationship(self):
+        from birthboard.models import BirthboardContract
+
+        record = self._record(BirthboardRecord.Status.WAITING_CONFIRM)
+        BirthboardParticipant.objects.create(
+            record=record,
+            user=self.creator,
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=True,
+            cost=10,
+            status=BirthboardParticipant.Status.PAID,
+        )
+        url = reverse(
+            'birthboard_image',
+            args=[record.pk, 'image'],
+        )
+
+        allowed_response = self.client.get(url)
+        self.assertEqual(allowed_response.status_code, 200)
+        self.assertEqual(
+            allowed_response['Cache-Control'],
+            'private, no-store',
+        )
+        b''.join(allowed_response.streaming_content)
+
+        BirthboardContract.objects.create(user=self.other, signed=True)
+        self.client.force_login(self.other)
+        denied_response = self.client.get(url)
+        self.assertEqual(denied_response.status_code, 404)
+
+
+class BirthboardReviewEnforcementTests(TestCase):
+    """Human review must be independent and enforce the written policy."""
+
+    def setUp(self):
+        from birthboard.models import (
+            BirthboardApprover,
+            BirthboardContract,
+            BirthboardSecondApprover,
+        )
+
+        self.initiator = User.objects.create_user(
+            username='review_initiator',
+            name='Initiator',
+            password='test',
+            usertype=User.Type.STUDENT,
+        )
+        self.reviewer = User.objects.create_user(
+            username='reviewer_both',
+            name='Reviewer',
+            password='test',
+            usertype=User.Type.STUDENT,
+        )
+        User.objects.filter(
+            pk__in=[self.initiator.pk, self.reviewer.pk]
+        ).update(is_newuser=False, active=True)
+        self.initiator.YQpoint = 40
+        self.initiator.save(update_fields=['YQpoint'])
+        BirthboardContract.objects.create(
+            user=self.initiator,
+            signed=True,
+        )
+        BirthboardContract.objects.create(
+            user=self.reviewer,
+            signed=True,
+        )
+        BirthboardApprover.objects.create(user=self.reviewer)
+        BirthboardSecondApprover.objects.create(user=self.reviewer)
+        self.client.force_login(self.reviewer)
+
+    def _record(self, status=BirthboardRecord.Status.WAITING_APPROVE):
+        record = BirthboardRecord.objects.create(
+            receiver_username='review_receiver',
+            receiver_name='Receiver',
+            date=timezone.now().date() + timedelta(days=7),
+            mode=0,
+            per_cost=10,
+            image=SimpleUploadedFile(
+                'review.jpg',
+                b'fake-image',
+                content_type='image/jpeg',
+            ),
+            status=status,
+        )
+        BirthboardParticipant.objects.create(
+            record=record,
+            user=self.initiator,
+            role=BirthboardParticipant.Role.SENDER,
+            is_initiator=True,
+            cost=10,
+            status=BirthboardParticipant.Status.PAID,
+        )
+        return record
+
+    def test_same_account_cannot_complete_both_reviews(self):
+        record = self._record()
+        record.first_approved = True
+        record.first_approver = self.reviewer
+        record.save(update_fields=['first_approved', 'first_approver'])
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {'action': 'approve', 'record_id': record.pk},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        record.refresh_from_db()
+        self.assertEqual(
+            record.status,
+            BirthboardRecord.Status.WAITING_APPROVE,
+        )
+        self.assertIsNone(record.second_approver)
+
+    def test_rejection_reason_is_validated_server_side(self):
+        record = self._record()
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {
+                'action': 'reject',
+                'record_id': record.pk,
+                'reasons': ['forged-reason'],
+                'detail': '',
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        record.refresh_from_db()
+        self.assertEqual(
+            record.status,
+            BirthboardRecord.Status.WAITING_APPROVE,
+        )
+
+    def test_pre_display_rejection_refunds_paid_senders(self):
+        record = self._record()
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {
+                'action': 'reject',
+                'record_id': record.pk,
+                'reasons': ['低俗恶搞'],
+                'detail': '违规位置',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        participant = record.participants.get(
+            role=BirthboardParticipant.Role.SENDER,
+        )
+        self.initiator.refresh_from_db()
+        self.assertEqual(
+            record.status,
+            BirthboardRecord.Status.TERMINATED_BY_ADMIN,
+        )
+        self.assertEqual(
+            participant.status,
+            BirthboardParticipant.Status.REFUNDED,
+        )
+        self.assertEqual(self.initiator.YQpoint, 50)
+
+    def test_ongoing_violation_creates_durable_takedown_and_restriction(self):
+        from birthboard.models import BirthboardContract
+
+        record = self._record(BirthboardRecord.Status.ONGOING)
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {
+                'action': 'reject',
+                'record_id': record.pk,
+                'reasons': ['诋毁侮辱隐私'],
+                'detail': '含个人隐私',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        restriction = BirthboardContract.objects.get(user=self.initiator)
+        self.assertTrue(record.display_takedown_pending)
+        self.assertIsNotNone(restriction.restricted_until)
+        self.assertGreater(restriction.restricted_until, datetime.now())
+        self.initiator.refresh_from_db()
+        self.assertEqual(self.initiator.YQpoint, 40)
+
+    def test_finished_violation_restricts_without_takedown_or_refund(self):
+        from birthboard.models import BirthboardContract
+
+        record = self._record(BirthboardRecord.Status.FINISHED)
+
+        response = self.client.post(
+            reverse('birthboard_approve'),
+            {
+                'action': 'reject',
+                'record_id': record.pk,
+                'reasons': ['诋毁侮辱隐私'],
+                'detail': '投放结束后发现含个人隐私',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        restriction = BirthboardContract.objects.get(user=self.initiator)
+        self.assertEqual(
+            record.status,
+            BirthboardRecord.Status.TERMINATED_BY_ADMIN,
+        )
+        self.assertFalse(record.display_takedown_pending)
+        self.assertIsNotNone(restriction.restricted_until)
+        self.initiator.refresh_from_db()
+        self.assertEqual(self.initiator.YQpoint, 40)
+
+
+class BirthboardDisplayRetryTests(TestCase):
+    """Display synchronization keeps durable state and handles empty runs."""
+
+    def setUp(self):
+        cache.delete(bb_jobs._BB_UPDATE_LOCK_KEY)
+
+    def tearDown(self):
+        cache.delete(bb_jobs._BB_UPDATE_LOCK_KEY)
+
+    @patch('playwright.sync_api.sync_playwright')
+    def test_nightly_job_skips_browser_when_nothing_changes(
+        self,
+        mock_playwright,
+    ):
+        bb_jobs.birthboard_nightly_update_2345()
+
+        mock_playwright.assert_not_called()
+
+    @patch('playwright.sync_api.sync_playwright')
+    @patch('birthboard.web_controller._run_update_cycle')
+    @patch('birthboard.web_controller.open_and_login')
+    def test_successful_takedown_clears_pending_flag(
+        self,
+        mock_open,
+        mock_update,
+        mock_playwright,
+    ):
+        from unittest.mock import Mock
+
+        browser = Mock()
+        page = Mock()
+        mock_open.return_value = (browser, page)
+        outcome = type('Outcome', (), {'ok': True})()
+        mock_update.return_value = (browser, page, outcome)
+        record = BirthboardRecord.objects.create(
+            receiver_username='retry_receiver',
+            receiver_name='Retry Receiver',
+            date=timezone.now().date(),
+            mode=0,
+            per_cost=10,
+            image=SimpleUploadedFile(
+                'retry.jpg',
+                b'fake-image',
+                content_type='image/jpeg',
+            ),
+            status=BirthboardRecord.Status.TERMINATED_BY_ADMIN,
+            display_takedown_pending=True,
+        )
+
+        result = bb_jobs.attempt_pending_takedown(record.pk)
+
+        self.assertTrue(result)
+        record.refresh_from_db()
+        self.assertFalse(record.display_takedown_pending)
+
+
+class BirthboardDisplayWorkflowTests(TestCase):
+    """Takedown failures are isolated and block later uploads."""
+
+    def test_mixed_cycle_attempts_every_takedown_before_stopping(self):
+        from birthboard import web_controller
+
+        attempted_labels = []
+
+        def fake_run_step(*, browser, page, label, **kwargs):
+            attempted_labels.append(label)
+            return browser, page, web_controller.StepOutcome(
+                label=label,
+                ok=label != '从播单删除-生日三联',
+                retryable=True,
+                error=(
+                    'simulated failure'
+                    if label == '从播单删除-生日三联'
+                    else None
+                ),
+            )
+
+        with patch.object(
+            web_controller,
+            '_run_step_with_restart',
+            side_effect=fake_run_step,
+        ):
+            _, _, outcome = web_controller._run_update_cycle(
+                playwright=object(),
+                browser=object(),
+                page=object(),
+                url='https://display.invalid/',
+                username='user',
+                password='password',
+                up_image_name=['new.png'],
+                del_image_name=['old.png'],
+            )
+
+        self.assertEqual(
+            attempted_labels,
+            [
+                '从播单删除-生日三联',
+                '从播单删除-1号横屏',
+                '删除素材库',
+            ],
+        )
+        self.assertFalse(outcome.ok)

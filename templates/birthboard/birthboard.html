@@ -1040,6 +1040,10 @@
 
       // 监听 iframe postMessage 高度调整
       window.addEventListener('message', function(e) {
+          var sourceFrame = document.getElementById('confirm-iframe');
+          if (e.origin !== window.location.origin
+              || !sourceFrame
+              || e.source !== sourceFrame.contentWindow) return;
           if (e.data && e.data.type === 'refresh-count') {
               // console.log('[birthboard] refresh-count msg received');
               refreshConfirmCount();
@@ -1229,7 +1233,7 @@
           $("#confirmChargeModal").hide();
           if (_confirmPending && _confirmPending.type === 'confirmCharge') {
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'confirmChargeConfirmed', recordId:_confirmPending.recordId}, '*');
+              w.postMessage({type:'confirmChargeConfirmed', recordId:_confirmPending.recordId}, window.location.origin);
               _confirmPending = null;
               return;
           }
@@ -2513,9 +2517,10 @@
       var _confirmPending = null;
       window.addEventListener('message', function(e) {
           var data = e.data;
-          if (!data || !data.type) return;
           var iframe = document.getElementById('confirm-iframe');
           var iframeWin = iframe && iframe.contentWindow;
+          if (e.origin !== window.location.origin || e.source !== iframeWin) return;
+          if (!data || !data.type) return;
 
           switch (data.type) {
               case 'showReject':
@@ -2590,7 +2595,7 @@
           if (e.target.dataset.action === 'confirm' && _confirmPending && _confirmPending.type === 'reject') {
               this.style.display = 'none';
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'rejectConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, '*');
+              w.postMessage({type:'rejectConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, window.location.origin);
               _confirmPending = null;
           }
       });
@@ -2603,7 +2608,7 @@
           if (e.target.dataset.action === 'confirm' && _confirmPending && _confirmPending.type === 'reject') {
               this.style.display = 'none';
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'rejectConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, '*');
+              w.postMessage({type:'rejectConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, window.location.origin);
               _confirmPending = null;
           }
       });
@@ -2616,7 +2621,7 @@
           if (e.target.dataset.action === 'confirm' && _confirmPending && _confirmPending.type === 'revoke') {
               this.style.display = 'none';
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'revokeConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, '*');
+              w.postMessage({type:'revokeConfirmed', recordId:_confirmPending.recordId, tab:_confirmPending.tab}, window.location.origin);
               _confirmPending = null;
           }
       });
@@ -2629,7 +2634,7 @@
           if (e.target.dataset.action === 'confirm' && _confirmPending && _confirmPending.type === 'abort') {
               this.style.display = 'none';
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'abortConfirmed', recordId:_confirmPending.recordId}, '*');
+              w.postMessage({type:'abortConfirmed', recordId:_confirmPending.recordId}, window.location.origin);
               _confirmPending = null;
           }
       });
@@ -2639,14 +2644,14 @@
               this.style.display = 'none';
               if (_confirmPending && _confirmPending.type === 'previewConfirm') {
                   var w = document.getElementById('confirm-iframe').contentWindow;
-                  w.postMessage({type:'previewCancelled', recordId:_confirmPending.recordId}, '*');
+                  w.postMessage({type:'previewCancelled', recordId:_confirmPending.recordId}, window.location.origin);
               }
               _confirmPending = null;
           }
           if (e.target.dataset.action === 'confirm' && _confirmPending && _confirmPending.type === 'previewConfirm') {
               this.style.display = 'none';
               var w = document.getElementById('confirm-iframe').contentWindow;
-              w.postMessage({type:'previewConfirmed', recordId:_confirmPending.recordId}, '*');
+              w.postMessage({type:'previewConfirmed', recordId:_confirmPending.recordId}, window.location.origin);
               _confirmPending = null;
           }
       });

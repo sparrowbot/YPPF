@@ -12,12 +12,18 @@ class BirthboardConfig(Config):
     # 海报"模版下载"链接：投放页图片上传区展示的可点击下载地址
     template_download_url = LazySetting(
         'template_download_url',
-        default='https://www.bilibili.com/video/BV1GJ411x7h7/?spm_id_from=333.337.search-card.all.click',
+        default='',
         type=str,
     )
+    max_image_bytes = LazySetting(
+        'max_image_bytes',
+        default=10 * 1024 * 1024,
+        type=int,
+    )
+    max_senders = LazySetting('max_senders', default=20, type=int)
 
 
-CONFIG = BirthboardConfig(ROOT_CONFIG, 'birthboard')
+CONFIG = BirthboardConfig(ROOT_CONFIG.get('birthboard', {}))
 
 
 class ShihannetConfig(Config):
@@ -25,6 +31,13 @@ class ShihannetConfig(Config):
     username = LazySetting('username', default='', type=str)
     password = LazySetting('password', default='', type=str)
     url = LazySetting('url', default='', type=str)
+    headless = LazySetting('headless', default=True, type=bool)
+    slow_mo_ms = LazySetting('slow_mo_ms', default=0, type=int)
+    network_retry_seconds = LazySetting(
+        'network_retry_seconds',
+        default=10,
+        type=int,
+    )
 
 
 shihannet = ShihannetConfig(ROOT_CONFIG.get('shihannet', {}))
