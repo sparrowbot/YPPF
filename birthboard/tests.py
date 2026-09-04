@@ -1482,3 +1482,90 @@ class BirthboardDisplayWorkflowTests(TestCase):
             ],
         )
         self.assertFalse(outcome.ok)
+
+
+class BirthboardNotifySenderTests(TestCase):
+    """birthboard 通知发件人：config 驱动，ensure_birthboard_sender 幂等创建。"""
+
+    def _ensure_sender(self) -> None:
+        """测试库先补最小 OrganizationType，再运行 ensure 命令。"""
+        from app.models import OrganizationType
+        OrganizationType.objects.get_or_create(
+            otype_id=31999,
+            defaults={
+                'otype_name': 'birthboard 测试类型',
+                'job_name_list': ['成员'],
+            },
+        )
+        call_command('ensure_birthboard_sender')
+
+    def test_ensure_command_creates_sender_idempotently(self) -> None:
+        from generic.models import User
+        from app.models import Organization
+        self._ensure_sender()
+        self.assertTrue(
+            User.objects.filter(username='yppf_birthboard').exists())
+        self.assertEqual(
+            Organization.objects.filter(oname='生日灯牌').count(), 1)
+        # 重复运行应保持幂等：不报错、不重复创建
+        call_command('ensure_birthboard_sender')
+        self.assertEqual(
+            Organization.objects.filter(oname='生日灯牌').count(), 1)
+
+    def test_sender_missing_raises_loudly(self) -> None:
+        from birthboard import notify
+        # 官方号缺失属于配置/部署错误，应显式抛错而不是静默失败
+        self.assertFalse(
+            User.objects.filter(username='yppf_birthboard').exists())
+        with self.assertRaises(LookupError):
+            notify._sender_user()
+
+    def test_broadcast_started_notifies_with_birthboard_sender(self) -> None:
+        from datetime import date
+        from birthboard import notify
+        from app.models import Notification
+        self._ensure_sender()
+        receiver = User.objects.create_user(
+            username='bb_recv_sender_test', name='接收人')
+        mock_record = type('_Rec', (), {
+            'receiver_name': '测试寿星',
+            'date': date.today(),
+        })()
+        with patch.object(
+            notify, '_recipient_users', return_value=[receiver]
+        ), patch(
+            'app.notification_utils.publish_notifications', return_value=True
+        ):
+            notify.notify_broadcast_started(mock_record)
+        note = Notification.objects.filter(
+            title='生日祝福投放已开始', receiver=receiver).first()
+        self.assertIsNotNone(note)
+        self.assertEqual(note.sender.username, 'yppf_birthboard')
+        self.assertEqual(note.sender.name, '生日灯牌')
+
+    def test_approval_reminder_skips_disabled_reminder_approver(self) -> None:
+        """reminder_enabled=False 的审核员不收重复提醒，但仍不影响其审核资格。"""
+        from datetime import date
+        from birthboard import notify
+        from birthboard.models import BirthboardApprover
+        from app.models import Notification
+        self._ensure_sender()
+        # 两名都“活跃”的审核员：A 开重复提醒、B 关重复提醒
+        user_a = User.objects.create_user(username='bb_appr_a', name='审核A')
+        user_b = User.objects.create_user(username='bb_appr_b', name='审核B')
+        BirthboardApprover.objects.create(
+            user=user_a, is_active=True, reminder_enabled=True)
+        BirthboardApprover.objects.create(
+            user=user_b, is_active=True, reminder_enabled=False)
+        mock_record = type('_Rec', (), {
+            'receiver_name': '测试寿星',
+            'date': date.today(),
+        })()
+        with patch(
+            'app.notification_utils.publish_notifications', return_value=True
+        ):
+            notify.notify_approval_reminder(mock_record, 'first')
+        self.assertTrue(Notification.objects.filter(
+            title='生日祝福投放待初审', receiver=user_a).exists())
+        self.assertFalse(Notification.objects.filter(
+            title='生日祝福投放待初审', receiver=user_b).exists())

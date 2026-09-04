@@ -17,6 +17,10 @@ __all__ = [
 # Create your models here.
 # 生日祝福投放记录模型，顶格定义
 class BirthboardRecord(models.Model):
+    class Meta:
+        verbose_name = '灯牌记录'
+        verbose_name_plural = '4.灯牌记录'
+
     receiver_username = models.CharField(max_length=64)
     receiver_name = models.CharField(max_length=64)
     date = models.DateField()
@@ -95,8 +99,14 @@ class ChangeRecord(models.Model):
         )
 # 二审员名单表
 class BirthboardSecondApprover(models.Model):
+    class Meta:
+        verbose_name = '终审人员'
+        verbose_name_plural = '2.终审人员'
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='birthboard_second_approver')
     is_active = models.BooleanField(default=True)
+    # 是否接收自动重复审核提醒；关闭后仍可正常审核，只是不再被提醒打扰
+    reminder_enabled = models.BooleanField('接收重复提醒', default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     note = models.CharField(max_length=64, blank=True, default='', help_text='备注')
 
@@ -153,8 +163,14 @@ class BirthboardRejectedIssue(models.Model):
 
 # 审核员名单表
 class BirthboardApprover(models.Model):
+    class Meta:
+        verbose_name = '初审人员'
+        verbose_name_plural = '1.初审人员'
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='birthboard_approver')
     is_active = models.BooleanField(default=True)
+    # 是否接收自动重复审核提醒；关闭后仍可正常审核，只是不再被提醒打扰
+    reminder_enabled = models.BooleanField('接收重复提醒', default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     note = models.CharField(max_length=64, blank=True, default='', help_text='备注')
 
@@ -163,6 +179,10 @@ class BirthboardApprover(models.Model):
 
 # 用户协议签署记录
 class BirthboardContract(models.Model):
+    class Meta:
+        verbose_name = '协议记录'
+        verbose_name_plural = '3.协议记录与小黑屋'
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='birthboard_contract')
     signed = models.BooleanField('已签署', default=False)
     signed_at = models.DateTimeField('签署时间', null=True, blank=True)

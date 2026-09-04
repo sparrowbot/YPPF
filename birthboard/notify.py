@@ -5,18 +5,21 @@
 bulk_notification_create 创建站内信，并设置 to_wechat 同步推送企业微信
 （重要消息等级 IMPORTANT）。
 每个函数内部自行处理异常，调用方无需 try/except。
+发件人为 birthboard 官方组织账号（config.birthboard.sender_username），
+默认 yppf_birthboard（组织名 生日灯牌），可用
+`python manage.py ensure_birthboard_sender` 幂等创建；切换发件人只需改 config。
+异常统一经 record.log logger 写入 log/birthboard.notify.log，避免静默失败。
 """
-import logging
-
 from generic.models import User
 from app.models import Notification
 from app.extern.wechat import WechatMessageLevel
 from app.notification_utils import (
     bulk_notification_create,
-    get_default_sender,
     notification_create,
 )
+from record.log.utils import get_logger
 
+from birthboard.config import CONFIG
 from birthboard.models import (
     BirthboardApprover,
     BirthboardParticipant,
@@ -24,7 +27,7 @@ from birthboard.models import (
     BirthboardSecondApprover,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 __all__ = [
     'notify_revoke',
@@ -40,6 +43,21 @@ __all__ = [
     'notify_broadcast_ending_soon',
     'notify_approval_reminder',
 ]
+
+
+def _sender_user() -> User:
+    """birthboard 通知发件人账号（读取 config.birthboard.sender_username）。
+
+    发件人账号缺失属于部署/配置错误：抛出异常后由各函数的异常日志记录
+    （统一 logger 写入 log/birthboard.notify.log），可用管理命令
+    `python manage.py ensure_birthboard_sender` 幂等创建。
+    """
+    sender = User.objects.filter(username=CONFIG.sender_username).first()
+    if sender is None:
+        raise LookupError(
+            f'birthboard 发送账号不存在: {CONFIG.sender_username!r}，'
+            '请运行 python manage.py ensure_birthboard_sender')
+    return sender
 
 
 def _receiver_user(record: BirthboardRecord):
@@ -76,7 +94,7 @@ def notify_revoke(record: BirthboardRecord):
     try:
         bulk_notification_create(
             _recipient_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放已取消',
             f'你参与的 {record.receiver_name} 的生日祝福投放（{record.date}）已被撤销。',
@@ -94,7 +112,7 @@ def notify_refund(record: BirthboardRecord, paid_users: dict):
         if receivers:
             bulk_notification_create(
                 receivers,
-                get_default_sender(),
+                _sender_user(),
                 Notification.Type.NEEDREAD,
                 '生日祝福投放退款通知',
                 f'你参与的 {record.receiver_name} 的生日祝福投放（{record.date}）已终止，'
@@ -113,7 +131,7 @@ def notify_auto_reject_refund(record: BirthboardRecord, paid_users: dict):
         if receivers:
             bulk_notification_create(
                 receivers,
-                get_default_sender(),
+                _sender_user(),
                 Notification.Type.NEEDREAD,
                 '生日祝福投放退款通知',
                 f'你参与的 {record.receiver_name} 的生日祝福投放（{record.date}）'
@@ -130,7 +148,7 @@ def notify_invite_sender(record: BirthboardRecord, sender, initiator_name: str, 
     try:
         notification_create(
             sender,
-            None,
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放邀请',
             f'{initiator_name} 邀请你参与 {record.receiver_name} 的'
@@ -147,7 +165,7 @@ def notify_receiver_confirmed(record: BirthboardRecord):
     try:
         bulk_notification_create(
             _sender_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福已确认',
             f'{record.receiver_name} 已确认 {record.date} 的生日祝福投放，将进入审核流程。',
@@ -165,7 +183,7 @@ def notify_payment_success(record: BirthboardRecord, payer_username: str, all_pa
         if payer is not None:
             notification_create(
                 payer,
-                None,
+                _sender_user(),
                 Notification.Type.NEEDREAD,
                 '扣款成功',
                 f'你为 {record.receiver_name} 的生日祝福投放（{record.date}）'
@@ -178,7 +196,7 @@ def notify_payment_success(record: BirthboardRecord, payer_username: str, all_pa
             if receiver is not None:
                 notification_create(
                     receiver,
-                    None,
+                    _sender_user(),
                     Notification.Type.NEEDREAD,
                     '生日祝福待确认',
                     f'你收到新的生日祝福投放（{record.date}），请前往页面确认。',
@@ -209,7 +227,7 @@ def notify_waiting_reminder(participant: BirthboardParticipant):
             url = '/birthboard/confirm?tab=received'
         notification_create(
             participant.user,
-            None,
+            _sender_user(),
             Notification.Type.NEEDREAD,
             title,
             content,
@@ -230,7 +248,7 @@ def notify_broadcast_starting_tomorrow(record: BirthboardRecord, target_date):
     try:
         bulk_notification_create(
             _recipient_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放即将开始',
             f'{record.receiver_name} 的生日祝福投放将于明天（{target_date}）开始展示！',
@@ -246,7 +264,7 @@ def notify_broadcast_started(record: BirthboardRecord):
     try:
         bulk_notification_create(
             _recipient_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放已开始',
             f'{record.receiver_name} 的生日祝福投放已正式开始展示！',
@@ -257,7 +275,7 @@ def notify_broadcast_started(record: BirthboardRecord):
         if receiver is not None:
             notification_create(
                 receiver,
-                None,
+                _sender_user(),
                 Notification.Type.NEEDREAD,
                 '书院祝你生日快乐！',
                 '今天是你的生日，书院祝你生日快乐！你的生日祝福投放已开始展示。',
@@ -273,7 +291,7 @@ def notify_broadcast_ended(record: BirthboardRecord, end_date):
     try:
         bulk_notification_create(
             _recipient_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放已结束',
             f'{record.receiver_name} 的生日祝福投放（{record.date} ~ {end_date}）已结束展示。',
@@ -289,7 +307,7 @@ def notify_broadcast_ending_soon(record: BirthboardRecord, end_date):
     try:
         bulk_notification_create(
             _recipient_users(record),
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             '生日祝福投放即将结束',
             f'{record.receiver_name} 的生日祝福投放（{record.date} ~ {end_date}）将于明天结束。',
@@ -303,17 +321,22 @@ def notify_broadcast_ending_soon(record: BirthboardRecord, end_date):
 # ========== 审核提醒通知 ==========
 
 def notify_approval_reminder(record: BirthboardRecord, stage: str):
-    """审核提醒：通知该阶段所有活跃审核员。stage: 'first' | 'second'"""
+    """审核提醒：通知该阶段所有活跃且开启重复提醒的审核员。stage: 'first' | 'second'
+
+    是否收到提醒由每名审核员的 reminder_enabled 独立控制（关闭不影响其审核权限）。
+    """
     try:
         if stage == 'first':
-            approver_qs = BirthboardApprover.objects.filter(is_active=True)
+            approver_qs = BirthboardApprover.objects.filter(
+                is_active=True, reminder_enabled=True)
             title = '生日祝福投放待初审'
             content = (
                 f'{record.receiver_name} 的生日祝福投放（{record.date}）'
                 '等待你初审，请尽快处理。'
             )
         else:
-            approver_qs = BirthboardSecondApprover.objects.filter(is_active=True)
+            approver_qs = BirthboardSecondApprover.objects.filter(
+                is_active=True, reminder_enabled=True)
             title = '生日祝福投放待终审'
             content = (
                 f'{record.receiver_name} 的生日祝福投放（{record.date}）'
@@ -325,7 +348,7 @@ def notify_approval_reminder(record: BirthboardRecord, stage: str):
         approvers = list(User.objects.filter(id__in=approver_ids))
         bulk_notification_create(
             approvers,
-            get_default_sender(),
+            _sender_user(),
             Notification.Type.NEEDREAD,
             title,
             content,

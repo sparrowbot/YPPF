@@ -21,6 +21,20 @@ class BirthboardConfig(Config):
         type=int,
     )
     max_senders = LazySetting('max_senders', default=20, type=int)
+    # 站内信/企业微信通知的发件人官方组织账号（Organization 类型）。
+    # 用管理命令 `python manage.py ensure_birthboard_sender` 幂等创建；
+    # 切换发件人只需改这里的 username（指向真实存在的组织账号）。
+    sender_username = LazySetting(
+        'sender_username',
+        default='yppf_birthboard',
+        type=str,
+    )
+    # 该发件人组织的显示名（Organization.oname / User.name），供创建命令使用。
+    sender_name = LazySetting(
+        'sender_name',
+        default='生日灯牌',
+        type=str,
+    )
 
 
 CONFIG = BirthboardConfig(ROOT_CONFIG.get('birthboard', {}))
