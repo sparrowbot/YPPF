@@ -91,3 +91,20 @@ html, body {
             margin-bottom: 50px;
             display: none;
         } */
+        /* 阅读进度条：固定于窗口顶部，指示整页已读进度 */
+        .reading-progress {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 5px;
+            background: rgba(0, 0, 0, 0.08);
+            z-index: 1000;
+            pointer-events: none; /* 不拦截页面点击 */
+        }
+        .reading-progress-fill {
+            height: 100%;
+            width: 0;
+            background: rgb(0, 166, 28);
+            transition: width 0.15s linear;
+        }

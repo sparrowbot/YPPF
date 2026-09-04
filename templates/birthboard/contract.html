@@ -26,9 +26,18 @@
           本人（下称“提交者”）自愿参与元培设计组主办的电子屏生日应援活动，并为上述寿星提交应援海报。在提交前，本人已认真阅读、理解并同意以下条款：
         </p>
         <div class="contract-space"></div>
-        <h3>一、授权</h3>
+        <h3>一、基本信息</h3>
         <p>
-          本人授权元培设计组在活动期间将本人提交的海报在北京大学35号楼元培学生宿舍地下室B1层入口处三块电子屏上公开轮播，并可出于审核、存档等目的复制、展示海报。
+          授权：本人授权元培设计组在活动期间将本人提交的海报在北京大学35号楼元培学生宿舍地下室B1层入口处三块电子屏上公开轮播，并可出于审核、存档等目的复制、展示海报。
+        </p>
+        <p>
+          时间：考虑到审核与管理的便利，可选择的投放时间为提交当天所在周的下一周周一至下下周周日，也请同学们尽量提前一周提交，给审核留时间。若提交时间过晚，很可能导致贺图无法按时发出。
+        </p>
+        <p>
+          审核：若你的贺图没有审核通过，则按提示做相应修改即可，我们会在规则允许的范围内，为同学们提供尽可能大的创作空间，也请同学们理解审核老师的工作。
+        </p>
+        <p>
+          投放流程：地下室大屏将在每天0点-1点、中午12点-13点三屏同时播放贺图。在这之外的时段，贺图将在左边的屏幕上滚动播放。
         </p>
         <div class="contract-space"></div>
         <h3>二、内容合规承诺</h3>
@@ -69,13 +78,15 @@
           <li>
             本人自愿扣除元气值参与活动，一旦审核通过后，不予退还（撤销投放也不退还）。
           </li>
+          <li>
+            若因本人内容提交过晚而导致无法按时投放，由此产生的后果由本人自行承担。
+          </li>
         </ol>
         <div class="contract-space"></div>
         <h3>五、其他</h3>
-        <ol>
-          <li>
+        <p>
             本人同意设计组根据活动需要对本协议未尽事宜进行解释，并服从设计组与学院学工部门的裁定。
-          </li>
+        </p>
         </ol>
         <div class="contract-space"></div>
         <p>&nbsp;</p>
@@ -208,5 +219,42 @@
 
     <!-- 小程序 webview 适配：返回首页在小程序内改为返回小程序（普通浏览器行为不变） -->
     <script src="{% static 'birthboard/birthboard_webview.js' %}"></script>
+
+    <!-- 阅读进度条：固定于窗口顶部，随滚动显示当前已读进度 -->
+    <div class="reading-progress" aria-hidden="true">
+      <div class="reading-progress-fill" id="reading-progress-fill"></div>
+    </div>
+    <script>
+      // 根据整页滚动位置更新顶部进度条宽度
+      (function () {
+        var fill = document.getElementById("reading-progress-fill");
+        var ticking = false;
+
+        function updateProgress() {
+          ticking = false;
+          var doc = document.documentElement;
+          var scrollTop = window.pageYOffset || doc.scrollTop || 0;
+          var scrollable = doc.scrollHeight - window.innerHeight;
+          // 页面不足一屏或已滚到底时按 100% 处理
+          var percent =
+            scrollable > 0
+              ? Math.min(100, Math.round((scrollTop / scrollable) * 100))
+              : 100;
+          fill.style.width = percent + "%";
+        }
+
+        function onScroll() {
+          if (!ticking) {
+            // 用 requestAnimationFrame 节流，避免滚动时反复布局
+            ticking = true;
+            window.requestAnimationFrame(updateProgress);
+          }
+        }
+
+        window.addEventListener("scroll", onScroll, { passive: true });
+        window.addEventListener("resize", onScroll);
+        updateProgress();
+      })();
+    </script>
   </body>
 </html>
