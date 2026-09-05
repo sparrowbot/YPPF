@@ -9,7 +9,11 @@ from pathlib import Path
 import sys
 from typing import Any
 from time import perf_counter
+import logging
+
 from birthboard.config import shihannet
+
+logger = logging.getLogger(__name__)
 
 def _step_result(ok, retryable=False, pending=None, result=None, error=None):
     return {
@@ -83,17 +87,26 @@ def open_and_login(playwright, url, username, password, max_login_retry=5):
             code = _solve_captcha(page, ocr)
             page.locator("input#randCode").fill(code)
             page.wait_for_timeout(500)
-            page.locator("button:has-text('登录')").click()
+            page.get_by_role("button", name="登录").first.click()
             page.wait_for_timeout(2000)
 
-            error_popup = page.locator("div#ext-gen44.x-shadow")
+            # 验证码错误弹窗：按文本检测，不再依赖动态 id。
+            error_popup = page.locator("div.x-shadow").filter(
+                has_text="验证码错误"
+            ).first
             if error_popup.is_visible(timeout=1500):
                 raise RuntimeError("验证码错误弹窗")
 
             print("登录成功")
-            page.locator(
-                "#ext-gen1105 > .x-grid-cell-inner > .x-tree-elbow-img"
-            ).click()
+            # 登录成功后点击左侧树节点的展开箭头（原 #ext-gen1105 为动态 id），
+            # 改为定位左侧树中可见的展开图标。
+            tree_elbow = page.locator(
+                "span.x-tree-elbow-img"
+            ).first
+            try:
+                tree_elbow.click(timeout=3000)
+            except Exception:
+                pass
             return browser, page
         except Exception as error:
             print(f"登录失败: {error}")
@@ -115,25 +128,45 @@ def open_and_login(playwright, url, username, password, max_login_retry=5):
 
 
 def _open_media_management(page, name):
-    """只点击左侧树菜单中的“多媒体素材管理”，避免和标签标题重名导致 strict mode 报错。"""
-    name_to_record_id = {
-        "多媒体素材管理": "22",
-        "播出单管理": "42",
-    }
+    """点击左侧树中的“多媒体素材管理”或“播出单管理”。
 
-    record_id = name_to_record_id.get(name)
-    if record_id:
-        row = page.locator(f"tr.x-grid-row[data-recordid='{record_id}']")
-        if row.count() > 0:
-            row.first.click()
-            return True
+    这两个是“多媒体管理”父节点下的叶子节点，父节点折叠时它们不渲染。
+    先查找目标文本，找不到时双击父节点“多媒体管理”展开后重试，
+    最多尝试 5 次；仍失败则返回 False 并终止。
+    """
+    parent = page.locator("span.x-tree-node-text").filter(
+        has_text=re.compile(r"^多媒体管理$")
+    )
 
-    menu = page.locator("span.x-tree-node-text").filter(has_text=re.compile(rf"^{name}$"))
-    if menu.count() == 0:
-        print(f"未找到左侧菜单“{name}”，已跳过")
-        return False
-    menu.first.click()
-    return True
+    for attempt in range(1, 6):
+        menu = page.locator("span.x-tree-node-text").filter(
+            has_text=re.compile(rf"^{re.escape(name)}$")
+        )
+        if menu.count() > 0:
+            try:
+                menu.first.click(timeout=2000)
+                return True
+            except Exception:
+                # 单击失败，尝试双击目标节点。
+                try:
+                    menu.first.dblclick(timeout=2000)
+                    return True
+                except Exception as exc:
+                    print(f"点击左侧菜单“{name}”失败: {exc}")
+
+        # 未找到或点击失败：双击父节点“多媒体管理”展开，再重试。
+        if parent.count() > 0:
+            try:
+                parent.first.dblclick(timeout=2000)
+            except Exception as exc:
+                print(f"展开父节点“多媒体管理”失败: {exc}")
+        else:
+            print("未找到父节点“多媒体管理”")
+        page.wait_for_timeout(500)
+        print(f"打开左侧菜单“{name}”第 {attempt}/5 次尝试")
+
+    print(f"打开左侧菜单“{name}”失败，已终止")
+    return False
 
 
 def _frame_by_acl_id(page, acl_id):
@@ -185,9 +218,13 @@ def _get_media_frame(page, timeout_ms=12000):
         return fixed_frame
 
     def _checker(frame):
-        stable_btn = frame.locator("#ElementUploadID").first
-        if stable_btn.count() > 0:
-            return stable_btn.is_visible(timeout=250)
+        # 按标题“多媒体素材管理”判断素材管理 iframe。
+        header = frame.locator("span.x-header-text").filter(
+            has_text=re.compile(r"^多媒体素材管理$")
+        )
+        if header.count() > 0:
+            return header.first.is_visible(timeout=250)
+        # 兜底：按“上传”按钮判断。
         return frame.get_by_role("button", name="上传").first.is_visible(timeout=250)
 
     return _find_visible_frame(page, _checker, timeout_ms=timeout_ms)
@@ -205,6 +242,13 @@ def _get_playlist_frame(page, playlist_name=None, timeout_ms=12000):
             pass
 
     def _checker(frame):
+        # 按标题“播出单管理”判断播出单管理 iframe。
+        header = frame.locator("span.x-header-text").filter(
+            has_text=re.compile(r"^播出单管理$")
+        )
+        if header.count() > 0:
+            return header.first.is_visible(timeout=250)
+        # 兜底：按“修改”按钮 + 播出单名判断。
         if not frame.get_by_role("button", name="修改").first.is_visible(timeout=250):
             return False
         if playlist_name:
@@ -251,13 +295,6 @@ def _get_picker_frame(play_frame, page, timeout_ms=12000, debug=False):
                     continue
 
                 try:
-                    if child.locator("#treeview-1069").first.is_visible(timeout=200):
-                        _dbg(f"命中弹窗iframe: window#{wi + 1}, iframe#{pi + 1}")
-                        return child
-                except Exception:
-                    pass
-
-                try:
                     if child.get_by_text("Birth", exact=True).first.is_visible(timeout=200):
                         _dbg(f"命中Birth文本iframe: window#{wi + 1}, iframe#{pi + 1}")
                         return child
@@ -278,13 +315,6 @@ def _get_picker_frame(play_frame, page, timeout_ms=12000, debug=False):
             child = iframe.content_frame
             if child is None:
                 continue
-
-            try:
-                if child.locator("#treeview-1069").first.is_visible(timeout=200):
-                    _dbg(f"回退命中treeview iframe序号: {i + 1}")
-                    return child
-            except Exception:
-                pass
 
             try:
                 if child.get_by_text("Birth", exact=True).first.is_visible(timeout=200):
@@ -316,12 +346,6 @@ def _close_picker_window(play_frame, page):
         except Exception:
             continue
 
-        if _safe_click(add_window.locator("#tool-1306-toolEl").first, "添加元素窗口关闭#tool-1306-toolEl", page, timeout=2500):
-            try:
-                add_window.wait_for(state="hidden", timeout=1500)
-            except Exception:
-                pass
-            return True
         if _safe_click(add_window.locator(".x-tool-close").first, "添加元素窗口关闭.x-tool-close", page, timeout=2500):
             try:
                 add_window.wait_for(state="hidden", timeout=1500)
@@ -329,8 +353,6 @@ def _close_picker_window(play_frame, page):
                 pass
             return True
 
-    if _safe_click(play_frame.locator("#tool-1306-toolEl").first, "窗口关闭#tool-1306-toolEl", page, timeout=2500):
-        return True
     return _safe_click(play_frame.locator(".x-tool-close").first, "窗口关闭.x-tool-close", page, timeout=2500)
 
 
@@ -360,6 +382,19 @@ def _safe_click(locator, desc, page, timeout=4000):
         return True
     except Exception as e:
         print(f"点击失败[{desc}]: {e}")
+        return False
+
+
+def _safe_click_force(locator, desc, page, timeout=3000):
+    """强制点击（force=True），绕过元素可见性/稳定性与遮罩层遮挡检查。"""
+    if page.is_closed():
+        print(f"页面已关闭，跳过: {desc}")
+        return False
+    try:
+        locator.click(timeout=timeout, force=True)
+        return True
+    except Exception as e:
+        print(f"强制点击失败[{desc}]: {e}")
         return False
 
 
@@ -401,9 +436,9 @@ def close_playlist(page):
         return _step_result(False, retryable=True, error="未定位到播出单区域frame")
 
     close_candidates = [
-        (play_frame.locator("#tool-1328-toolEl").first, "播出单窗口关闭#tool-1328-toolEl"),
-        (play_frame.locator("[id$='-toolEl']").first, "播出单窗口关闭[id$='-toolEl']"),
+        # 优先用稳定的 class 定位关闭按钮，动态 id 兜底。
         (play_frame.locator(".x-tool-close").first, "播出单窗口关闭.x-tool-close"),
+        (play_frame.locator("[id$='-toolEl']").first, "播出单窗口关闭[id$='-toolEl']"),
     ]
     closed = False
     for locator, desc in close_candidates:
@@ -422,7 +457,7 @@ def close_playlist(page):
 
 def _open_media_category(frame, category_name="Birth"):
     """在素材分类树中选中目录，优先使用稳定 recordid。"""
-    stable_row = frame.locator("#treeview-1069 tr.x-grid-row").filter(
+    stable_row = frame.locator("tr.x-grid-row").filter(
         has=frame.locator("span.x-tree-node-text", has_text=re.compile(rf"^{re.escape(category_name)}$"))
     ).first
     if stable_row.count() > 0:
@@ -470,15 +505,15 @@ def upload_material(page, image_path):
     media_frame = _get_media_frame(page)
 
     _open_media_category(media_frame, "Birth")
-    if not _safe_click(media_frame.locator("#ElementUploadID").first, "上传按钮#ElementUploadID", page, timeout=2500):
-        _safe_click(media_frame.get_by_role("button", name="上传").first, "上传按钮(角色)", page, timeout=2500)
+    # 上传按钮：按文本“上传”定位，不再依赖动态 id。
+    _safe_click(media_frame.get_by_role("button", name="上传").first, "上传按钮(角色)", page, timeout=2500)
 
     file_input = media_frame.locator("input[type='file']").first
     file_input.wait_for(state="attached", timeout=5000)
     file_input.set_input_files(image_path)
 
-    if not _safe_click(media_frame.locator("#uploadBtnId").first, "上传确认按钮#uploadBtnId", page, timeout=2500):
-        _safe_click(media_frame.get_by_role("button", name="上传").first, "上传确认按钮(角色)", page, timeout=2500)
+    # 上传确认按钮：取最后一个“上传”按钮（通常是当前上传弹窗的确认）。
+    _safe_click(media_frame.get_by_role("button", name="上传").last, "上传确认按钮(角色)", page, timeout=2500)
 
     _safe_click(media_frame.locator(".x-tool-close").first, "上传弹窗关闭按钮", page, timeout=1500)
     _close_visible_popup(media_frame, page)
@@ -581,8 +616,8 @@ def delete_material(page, image_name):
         if len(not_matched) == len(names):
             return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
 
-    if not _safe_click(frame.locator("#ElementDeleteID").first, "删除按钮#ElementDeleteID", page, timeout=2500):
-        _safe_click(frame.get_by_role("button", name="删除").first, "删除按钮(角色)", page, timeout=2500)
+    # 删除按钮：按文本“删除”定位，不再依赖动态 id。
+    _safe_click(frame.get_by_role("button", name="删除").first, "删除按钮(角色)", page, timeout=2500)
     frame.get_by_role("button", name="是").click()
     frame.get_by_role("button", name="确定").click()
     print(f"素材删除完成: {image_name}")
@@ -644,7 +679,24 @@ def update_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
     _close_visible_popup(play_frame, page)
     play_frame.get_by_text(playlist_name, exact=True).first.click(timeout=3000)
     play_frame.get_by_role("button", name="修改").first.click(timeout=3000)
-    play_frame.locator("#region_1").first.click(button="right", timeout=3000)
+    # 右键点击播出单编排区域弹出菜单。
+    # region_1 是叠加在模板上的半透明编排层，右键落在它上面才能弹出菜单；
+    # 背景图 backgroundImage 在其下层，右键无效，故仅作兜底。
+    template_panel = play_frame.locator("div.x-panel").filter(
+        has_text="模版区域"
+    ).first
+    right_click_targets = [
+        template_panel.locator("#region_1").first,
+        template_panel.locator("#backgroundImage").first,
+        template_panel.locator("#TemplateRegionID").first,
+    ]
+    for target in right_click_targets:
+        try:
+            target.click(button="right", timeout=3000)
+            break
+        except Exception:
+            continue
+    page.wait_for_timeout(500)
     play_frame.get_by_role("link", name="添加元素").first.click(timeout=3000)
 
     picker_frame = _get_picker_frame(play_frame, page, debug=debug)
@@ -756,6 +808,184 @@ def update_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
             return _step_result(False, retryable=True, pending=not_matched, result=not_matched, error="有未匹配到素材")
 
     _close_picker_window(play_frame, page)
+
+    # 将新加入的素材切换效果统一设置为“上进”。
+    # 参考 delete_playlist 的选行方式：在播出单 frame 中按名称列匹配并选中。
+    try:
+        added_filenames = [
+            re.split(r"[\\/]", str(n))[-1]
+            for n in names
+            if n and re.split(r"[\\/]", str(n))[-1] not in not_matched
+        ]
+
+        def _row_key(row_locator):
+            row_id = row_locator.get_attribute("data-recordid")
+            if not row_id:
+                row_id = row_locator.get_attribute("id")
+            if not row_id:
+                row_id = row_locator.inner_text(timeout=1000).strip()
+            return row_id
+
+        def _name_cell_text(row_locator):
+            selectors = [
+                "td.x-grid-cell-gridcolumn-1214 div.x-grid-cell-inner",
+                "xpath=.//td[@role='gridcell'][3]//div[contains(@class,'x-grid-cell-inner')]",
+                "xpath=.//td[contains(@class,'x-grid-cell-gridcolumn')][1]//div[contains(@class,'x-grid-cell-inner')]",
+            ]
+            for sel in selectors:
+                cell = row_locator.locator(sel).first
+                try:
+                    if cell.count() == 0:
+                        continue
+                    text = cell.inner_text(timeout=1000)
+                    text = text.replace("\xa0", " ").strip()
+                    if text:
+                        return text
+                except Exception:
+                    continue
+            return ""
+
+        def _match_name_cell(cell_text, filename):
+            text_l = cell_text.strip().lower()
+            filename_l = filename.lower()
+            stem_l = re.sub(r"\.[^.]+$", "", filename_l)
+            if text_l == filename_l:
+                return True
+            if stem_l and text_l.startswith(stem_l + "_"):
+                return True
+            return False
+
+        def _is_row_selected(row_locator):
+            try:
+                cls = row_locator.get_attribute("class") or ""
+                return "x-grid-row-selected" in cls
+            except Exception:
+                return False
+
+        def _click_and_ensure_selected(row_locator, use_ctrl):
+            if use_ctrl:
+                row_locator.click(modifiers=["ControlOrMeta"])
+            else:
+                row_locator.click()
+            page.wait_for_timeout(120)
+            if _is_row_selected(row_locator):
+                return True
+            checker = row_locator.locator(
+                "td.x-grid-cell-row-checker .x-grid-row-checker"
+            ).first
+            try:
+                if checker.count() > 0:
+                    if use_ctrl:
+                        checker.click(modifiers=["ControlOrMeta"])
+                    else:
+                        checker.click()
+                    page.wait_for_timeout(120)
+                    return _is_row_selected(row_locator)
+            except Exception:
+                return _is_row_selected(row_locator)
+            return _is_row_selected(row_locator)
+
+        selected_rows = set()
+        has_selected = False
+        rows = play_frame.locator("tr.x-grid-row")
+        row_count = rows.count()
+
+        for filename in added_filenames:
+            matched = False
+            for i in range(row_count):
+                row_locator = rows.nth(i)
+                try:
+                    if not row_locator.is_visible():
+                        continue
+                except Exception:
+                    continue
+
+                row_key = _row_key(row_locator)
+                if not row_key or row_key in selected_rows:
+                    continue
+
+                try:
+                    name_text = _name_cell_text(row_locator)
+                except Exception:
+                    continue
+
+                if not name_text or not _match_name_cell(name_text, filename):
+                    continue
+
+                use_ctrl = has_selected
+                selected_ok = _click_and_ensure_selected(row_locator, use_ctrl)
+                if not has_selected and selected_ok:
+                    has_selected = True
+                if not selected_ok:
+                    continue
+
+                selected_rows.add(row_key)
+                matched = True
+
+            if not matched:
+                print(f"设置切换效果未找到素材: {filename}")
+
+        if selected_rows:
+            # 先点击“图片特效”文本框，再点击“切换效果”按钮。
+            _safe_click(
+                play_frame.get_by_role("button", name="切换效果").first,
+                "切换效果按钮",
+                page,
+                timeout=3000,
+            )
+            _safe_click(
+                play_frame.get_by_role("textbox", name="图片特效:").first,
+                "图片特效文本框",
+                page,
+                timeout=3000,
+            )
+            # 选中“上进”选项。
+            _safe_click(
+                play_frame.get_by_role("option", name="上进", exact=True).first,
+                "切换效果-上进",
+                page,
+                timeout=3000,
+            )
+            # 点击“设置图片特效”弹窗内的“保存”按钮。
+            # 该按钮是 <a role="button"> 元素，id 每次会话都会变化。
+            # 页面上可能残留多个同名弹窗，且被遮罩(mask)遮挡；
+            # 遍历所有同名弹窗，选一个可见的，对其“保存”按钮做 force 点击。
+            effect_windows = play_frame.locator("div.x-window").filter(
+                has_text="设置图片特效"
+            )
+            print(
+                "[debug] play_frame 中标题含“设置图片特效”的弹窗数:",
+                effect_windows.count(),
+            )
+            ok = False
+            window_count = effect_windows.count()
+            for idx in range(window_count - 1, -1, -1):
+                effect_window = effect_windows.nth(idx)
+                try:
+                    if not effect_window.is_visible(timeout=1000):
+                        continue
+                except Exception:
+                    continue
+                save_btn = effect_window.get_by_text("保存", exact=True).first
+                print(
+                    f"[debug] 弹窗#{idx} 内文本“保存”的元素数:",
+                    save_btn.count(),
+                )
+                if save_btn.count() == 0:
+                    continue
+                # 用 force 点击绕过 mask 遮挡，并直接命中该按钮。
+                ok = _safe_click_force(
+                    save_btn, f"设置图片特效-保存(force#{idx})", page
+                )
+                if ok:
+                    print(f"[debug] 设置图片特效-保存 点击结果: {ok} (弹窗#{idx})")
+                    break
+            if not ok:
+                print("[debug] 设置图片特效-保存 点击结果: False")
+            _click_optional_confirm(page, play_frame, max_clicks=2)
+    except Exception:
+        logger.exception("[birthboard.web_controller] set transition effect failed")
+
     if not _safe_click(play_frame.get_by_role("button", name="保存").first, "播出单保存", page, timeout=3000):
         return
     _click_optional_confirm(page, play_frame, max_clicks=2)
@@ -955,18 +1185,10 @@ def delete_playlist(page, image_name, playlist_name="0-1点生日三联", debug=
         return _step_result(False, retryable=False, error="页面已关闭")
 
     def _click_delete_button():
-        try:
-            btn_class = play_frame.locator("#button-1220").first.get_attribute("class")
-            print(f"删除按钮class: {btn_class}")
-        except Exception:
-            pass
-
+        # 只按文本“删除”定位按钮，避免依赖动态 id(#button-xxxx)。
         candidates = [
-            (play_frame.locator("#button-1220-btnInnerEl"), "删除按钮#button-1220-btnInnerEl"),
-            (play_frame.locator("#button-1220-btnEl"), "删除按钮#button-1220-btnEl"),
-            (play_frame.locator("#button-1220"), "删除按钮#button-1220"),
-            (play_frame.locator("span.x-btn-inner").filter(has_text=re.compile(r"^删除$", re.IGNORECASE)).first, "删除按钮(span.x-btn-inner)"),
             (play_frame.get_by_role("button", name="删除").first, "删除按钮(播出单frame)"),
+            (play_frame.locator("span.x-btn-inner").filter(has_text=re.compile(r"^删除$", re.IGNORECASE)).first, "删除按钮(span.x-btn-inner)"),
             (page.get_by_role("button", name="删除").first, "删除按钮(页面)"),
         ]
         for locator, desc in candidates:
@@ -1361,23 +1583,45 @@ def main():
 
 
 
-# def run():
-#     url = "http://192.168.8.2/admin/index/logon/"
-#     username = "admin"
-#     password = "abc123456"
-#     image_path = "E:\\desktop\\Birth\\2026041701null.png"
-#     image_name = "2_17677841565904.png"
-#     date = "20260417"
+def run():
+    url = "http://192.168.8.2/admin/index/logon/"
+    username = "admin"
+    password = "2964f3db1822AC"
 
-#     with sync_playwright() as p:
-#         browser, page = open_and_login(p, url, username, password)
-#         try:
-#             update_playlist(page, image_name)
-#             # build_playlist(page, image_name, date)
-#             # close_playlist(page)
-#         finally:
-#             browser.close()
+    import os as _os
+    from django.conf import settings as _settings
+    media_dir = _os.path.join(_settings.MEDIA_ROOT, 'birthboard_images')
+    files = [
+        f for f in _os.listdir(media_dir)
+        if _os.path.isfile(_os.path.join(media_dir, f))
+        and not f.startswith('._')
+    ]
+    up_image_path = [
+        _os.path.join(media_dir, f) for f in files[:2]
+    ] if len(files) >= 2 else []
+    del_image_path = [
+        _os.path.join(media_dir, f) for f in files[2:4]
+    ] if len(files) >= 4 else []
+
+    print(f"up_image_path={up_image_path}")
+    print(f"del_image_path={del_image_path}")
+
+    with sync_playwright() as p:
+        browser, page = open_and_login(p, url, username, password)
+        try:
+            _run_update_cycle(
+                playwright=p,
+                browser=browser,
+                page=page,
+                url=url,
+                username=username,
+                password=password,
+                up_image_name=[],
+                del_image_name=del_image_path,
+            )
+        finally:
+            browser.close()
 
 
-# if __name__ == "__main__":
-#     run()
+if __name__ == "__main__":
+    run()
